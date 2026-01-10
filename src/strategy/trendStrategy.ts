@@ -174,9 +174,11 @@ export class TrendStrategy {
     currentIndex: number
   ): { shouldExit: boolean; reason: string } {
     const cfg = this.config.strategy;
-    const currentSignal = signalIndicators[currentIndex];
+    const signal = signalIndicators[currentIndex];
 
-    // Check stop loss
+    /**
+     * 1️⃣ HARD STOP —— 风险控制（第一优先级）
+     */
     if (position.side === "long" && currentPrice <= position.stopLoss) {
       return {
         shouldExit: true,
@@ -190,11 +192,26 @@ export class TrendStrategy {
       };
     }
 
-    // Check trailing stop (ATR-based take profit)
+    /**
+     * 2️⃣ PROFIT ACTIVATION —— 盈利未达到阈值，不启用 trailing
+     */
+    const entryPrice = position.entryPrice;
+    const atr = position.entryAtr;
+    const profitR =
+      position.side === "long"
+        ? (currentPrice - entryPrice) / atr
+        : (entryPrice - currentPrice) / atr;
+
+    if (profitR < cfg.trailingActivationR) {
+      return { shouldExit: false, reason: "" };
+    }
+
+    /**
+     * 3️⃣ TRAILING STOP —— 锁利润，但让趋势跑
+     */
     if (position.side === "long") {
       const highestPrice = Math.max(position.highestPrice, currentPrice);
-      const atr = currentSignal.atr || position.entryAtr;
-      const trailingStop = highestPrice - cfg.takeProfitMultiplier * atr;
+      const trailingStop = highestPrice - cfg.trailingStopATR * atr;
       
       if (currentPrice <= trailingStop) {
         return {
@@ -204,8 +221,7 @@ export class TrendStrategy {
       }
     } else if (position.side === "short") {
       const lowestPrice = Math.min(position.lowestPrice, currentPrice);
-      const atr = currentSignal.atr || position.entryAtr;
-      const trailingStop = lowestPrice + cfg.takeProfitMultiplier * atr;
+      const trailingStop = lowestPrice + cfg.trailingStopATR * atr;
       
       if (currentPrice >= trailingStop) {
         return {
@@ -215,8 +231,11 @@ export class TrendStrategy {
       }
     }
 
-    // Check trend reversal (4h)
+    /**
+     * 4️⃣ TREND EXIT —— 只有“明确反转”才走
+     */
     const trend = this.detectTrend(trendIndicators);
+  
     if (
       (position.side === "long" && trend.trend === "short") ||
       (position.side === "short" && trend.trend === "long")
@@ -227,14 +246,9 @@ export class TrendStrategy {
       };
     }
 
-    // Check max hold time (50 bars)
-    if (position.barsHeld >= cfg.maxHoldBars) {
-      return {
-        shouldExit: true,
-        reason: `Max hold time reached (${cfg.maxHoldBars} bars)`,
-      };
-    }
-
+  /**
+   * 5️⃣ NO TIME EXIT —— 趋势系统不看时间
+   */
     return { shouldExit: false, reason: "" };
   }
 

@@ -21,8 +21,8 @@ export interface Config {
     emaLong: number; // EMA200 for 4h trend
     atrPeriod: number; // ATR period (default 14)
     stopLossMultiplier: number; // 1.5 × ATR
-    takeProfitMultiplier: number; // 2.5 × ATR for trailing stop
-    maxHoldBars: number; // 50 bars for forced exit
+    trailingActivationR: number;
+    trailingStopATR: number;
   };
 
   // Risk management
@@ -56,8 +56,8 @@ export const defaultConfig: Config = {
     emaLong: 200,
     atrPeriod: 14,
     stopLossMultiplier: 1.5,
-    takeProfitMultiplier: 2.5,
-    maxHoldBars: 50,
+    trailingActivationR: 1.5,
+    trailingStopATR: 2.5,
   },
   risk: {
     maxRiskPerTrade: 0.01, // 1%
