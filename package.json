@@ -1,0 +1,23 @@
+{
+  "name": "trading-agent",
+  "version": "1.0.0",
+  "description": "MVP级加密货币趋势跟随Trading Agent",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "ts-node src/index.ts",
+    "backtest": "ts-node src/index.ts --mode=backtest"
+  },
+  "keywords": ["trading", "crypto", "backtest", "binance"],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "axios": "^1.6.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.3.3"
+  }
+}
