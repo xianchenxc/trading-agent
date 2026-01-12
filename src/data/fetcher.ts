@@ -1,16 +1,26 @@
 /**
  * K-line data fetcher
  * Supports both real-time and historical data from Binance
+ * Includes local cache to reduce API requests
  */
 
 import axios from "axios";
 import { Kline } from "../types";
+import { DataCache } from "./cache";
 
 export class DataFetcher {
   private baseUrl: string;
+  private cache: DataCache;
+  private useCache: boolean;
 
-  constructor(baseUrl: string = "https://api.binance.com") {
+  constructor(
+    baseUrl: string = "https://api.binance.com",
+    useCache: boolean = true,
+    cacheDir?: string
+  ) {
     this.baseUrl = baseUrl;
+    this.useCache = useCache;
+    this.cache = new DataCache(cacheDir);
   }
 
   /**
@@ -59,9 +69,75 @@ export class DataFetcher {
 
   /**
    * Fetch klines for backtesting
-   * Fetches multiple batches if needed
+   * Uses cache to reduce API requests - only fetches missing data
    */
   async fetchKlinesForBacktest(
+    symbol: string,
+    interval: string,
+    startTime: number,
+    endTime: number
+  ): Promise<Kline[]> {
+    // Try to load from cache first
+    if (this.useCache) {
+      const cachedKlines = this.cache.getCachedKlines(
+        symbol,
+        interval,
+        startTime,
+        endTime
+      );
+
+      // Check if we have complete coverage
+      const gaps = this.cache.findGaps(symbol, interval, startTime, endTime);
+
+      if (gaps.length === 0 && cachedKlines.length > 0) {
+        // Cache hit - return cached data
+        console.log(
+          `Cache hit: ${cachedKlines.length} ${interval} klines for ${symbol}`
+        );
+        return cachedKlines;
+      }
+
+      // Partial cache hit - fetch missing gaps
+      if (cachedKlines.length > 0) {
+        console.log(
+          `Partial cache: ${cachedKlines.length} cached, fetching ${gaps.length} gap(s)`
+        );
+      } else {
+        console.log(`Cache miss: fetching data for ${symbol} ${interval}`);
+      }
+
+      // Fetch missing data for each gap
+      const fetchedKlines: Kline[] = [];
+      for (const [gapStart, gapEnd] of gaps) {
+        const gapData = await this.fetchKlinesFromAPI(
+          symbol,
+          interval,
+          gapStart,
+          gapEnd
+        );
+        fetchedKlines.push(...gapData);
+
+        // Save fetched data to cache
+        if (gapData.length > 0) {
+          this.cache.mergeCache(symbol, interval, gapData);
+        }
+      }
+
+      // Merge cached and fetched data
+      const allKlines = [...cachedKlines, ...fetchedKlines];
+      const uniqueKlines = this.deduplicateKlines(allKlines);
+      return uniqueKlines.sort((a, b) => a.openTime - b.openTime);
+    }
+
+    // Cache disabled - fetch directly from API
+    return this.fetchKlinesFromAPI(symbol, interval, startTime, endTime);
+  }
+
+  /**
+   * Fetch klines from API (internal method)
+   * Fetches multiple batches if needed
+   */
+  private async fetchKlinesFromAPI(
     symbol: string,
     interval: string,
     startTime: number,
@@ -73,7 +149,7 @@ export class DataFetcher {
 
     while (true) {
       const klines = await this.fetchKlines(symbol, interval, limit, currentEndTime);
-      
+
       if (klines.length === 0) break;
 
       // Filter klines within time range
@@ -89,12 +165,23 @@ export class DataFetcher {
       }
 
       currentEndTime = klines[0].openTime - 1;
-      
+
       // Small delay to avoid rate limiting
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
 
     return allKlines.sort((a, b) => a.openTime - b.openTime);
+  }
+
+  /**
+   * Remove duplicate klines (same openTime)
+   */
+  private deduplicateKlines(klines: Kline[]): Kline[] {
+    const map = new Map<number, Kline>();
+    for (const kline of klines) {
+      map.set(kline.openTime, kline);
+    }
+    return Array.from(map.values());
   }
 
   /**

@@ -65,6 +65,12 @@ export interface Config {
     commissionRate: number; // e.g. 0.001 (0.1%)
     slippageRate: number;   // e.g. 0.0005 (0.05%)
   };
+
+  // Data cache settings
+  cache: {
+    enabled: boolean;        // Enable/disable cache
+    directory: string;       // Cache directory path
+  };
 }
 
 export const defaultConfig: Config = {
@@ -123,5 +129,10 @@ export const defaultConfig: Config = {
     initialCapital: 10_000,
     commissionRate: 0.001, // 0.1%
     slippageRate: 0.0005,  // 0.05%
+  },
+
+  cache: {
+    enabled: true,
+    directory: "data/cache",
   },
 };

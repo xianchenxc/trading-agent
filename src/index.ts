@@ -30,10 +30,15 @@ async function runBacktest(config: Config) {
   console.log(`Initial Capital: $${config.backtest.initialCapital}`);
   console.log(`Commission: ${(config.backtest.commissionRate * 100).toFixed(2)}%`);
   console.log(`Slippage: ${(config.backtest.slippageRate * 100).toFixed(2)}%`);
+  console.log(`Cache: ${config.cache.enabled ? "Enabled" : "Disabled"}`);
   console.log("=".repeat(60));
   console.log();
 
-  const fetcher = new DataFetcher(config.exchange.baseUrl);
+  const fetcher = new DataFetcher(
+    config.exchange.baseUrl,
+    config.cache.enabled,
+    config.cache.directory
+  );
   const engine = new BacktestEngine(config);
 
   try {
@@ -41,9 +46,12 @@ async function runBacktest(config: Config) {
     console.log("Fetching historical data...");
     
     // For backtest, we need data from the past
-    // Let's use a reasonable time range (e.g., last 3 months)
-    const endTime = Date.now();
-    const startTime = endTime - 360 * 24 * 60 * 60 * 1000; // 180 days ago
+    // Use today 0:00:00 as endTime to match the closeTime of the last complete K-line
+    // For 1h K-lines, the last complete bar is 23:00-00:00, which closes at 00:00:00
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const endTime = today.getTime();
+    const startTime = endTime - 360 * 24 * 60 * 60 * 1000; // 360 days ago
 
     // Fetch both HTF (4h) and LTF (1h) klines
     console.log(`Fetching ${config.timeframe.trend} klines (HTF)...`);
