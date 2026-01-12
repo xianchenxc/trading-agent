@@ -3,19 +3,22 @@
  * Supports both simulated and real exchange (extensible)
  */
 
-import { EntrySignal, Position, Trade } from "../types";
+// NOTE: This file is deprecated and not used in the current architecture
+// Keeping for potential future use
+
+import { StrategySignal, Position, TradeRecord } from "../types";
 import { Config } from "../config";
 
 export interface Exchange {
   /**
    * Place a market order to open a position
    */
-  openPosition(signal: EntrySignal, quantity: number): Promise<Position>;
+  openPosition(signal: StrategySignal, size: number): Promise<Position>;
 
   /**
    * Close a position at market price
    */
-  closePosition(position: Position, reason: string): Promise<Trade>;
+  closePosition(position: Position, reason: string): Promise<TradeRecord>;
 
   /**
    * Get current price
@@ -48,59 +51,55 @@ export class SimulatedExchange implements Exchange {
     return this.currentPrice;
   }
 
-  async openPosition(signal: EntrySignal, quantity: number): Promise<Position> {
-    // Apply slippage
-    const slippageMultiplier = 1 + (signal.side === "long" ? 1 : -1) * this.config.backtest.slippageRate;
-    const executionPrice = signal.price * slippageMultiplier;
+  async openPosition(signal: StrategySignal, size: number): Promise<Position> {
+    if (!signal.side || !signal.stopLoss) {
+      throw new Error("Invalid signal: missing side or stopLoss");
+    }
+    
+    // Apply slippage (simplified - would need current price)
+    const executionPrice = 0; // TODO: Get from market
 
     const position: Position = {
       side: signal.side,
       entryPrice: executionPrice,
-      entryTime: signal.timestamp,
-      quantity,
+      entryTime: Date.now(),
+      size,
       stopLoss: signal.stopLoss,
-      highestPrice: executionPrice,
-      lowestPrice: executionPrice,
-      entryAtr: signal.atr,
-      barsHeld: 0,
     };
 
     return position;
   }
 
-  async closePosition(position: Position, reason: string): Promise<Trade> {
+  async closePosition(position: Position, reason: string): Promise<TradeRecord> {
     // Apply slippage
-    const slippageMultiplier = 1 + (position.side === "long" ? -1 : 1) * this.config.backtest.slippageRate;
+    const slippageMultiplier = 1 + (position.side === "LONG" ? -1 : 1) * this.config.backtest.slippageRate;
     const executionPrice = this.currentPrice * slippageMultiplier;
 
     // Calculate commission
-    const entryValue = position.entryPrice * position.quantity;
-    const exitValue = executionPrice * position.quantity;
+    const entryValue = position.entryPrice * position.size;
+    const exitValue = executionPrice * position.size;
     const commission = (entryValue + exitValue) * this.config.backtest.commissionRate;
 
     // Calculate PnL
     let pnl: number;
-    if (position.side === "long") {
-      pnl = (executionPrice - position.entryPrice) * position.quantity - commission;
+    if (position.side === "LONG") {
+      pnl = exitValue - entryValue - commission;
     } else {
-      pnl = (position.entryPrice - executionPrice) * position.quantity - commission;
+      pnl = entryValue - exitValue - commission;
     }
 
-    const pnlPercent = (pnl / entryValue) * 100;
-
-    const trade: Trade = {
-      id: `trade_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+    const trade: TradeRecord = {
       side: position.side,
       entryPrice: position.entryPrice,
-      exitPrice: executionPrice,
       entryTime: position.entryTime,
+      exitPrice: executionPrice,
       exitTime: Date.now(),
-      quantity: position.quantity,
+      size: position.size,
       pnl,
-      pnlPercent,
-      entryReason: "Strategy signal",
-      exitReason: reason,
       commission,
+      slippage: Math.abs(executionPrice - this.currentPrice) * position.size,
+      equityAfterTrade: 0, // TODO: Calculate from account state
+      reason: reason as any,
     };
 
     return trade;
@@ -126,12 +125,12 @@ export class BinanceExchange implements Exchange {
     throw new Error("Real exchange not implemented yet");
   }
 
-  async openPosition(signal: EntrySignal, quantity: number): Promise<Position> {
+  async openPosition(signal: StrategySignal, size: number): Promise<Position> {
     // TODO: Implement real order placement
     throw new Error("Real exchange not implemented yet");
   }
 
-  async closePosition(position: Position, reason: string): Promise<Trade> {
+  async closePosition(position: Position, reason: string): Promise<TradeRecord> {
     // TODO: Implement real order placement
     throw new Error("Real exchange not implemented yet");
   }

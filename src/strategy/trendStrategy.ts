@@ -1,270 +1,162 @@
+import { 
+  Kline, 
+  StrategySignal, 
+  PositionState, 
+  TradeReason,
+  HTFIndicatorData,
+  LTFIndicatorData,
+  HTFTrendState,
+  HTFContext
+} from "../types";
+
 /**
- * Trend following strategy implementation
- * Implements the trading rules as specified
+ * Multi-Timeframe Trend Strategy (v1)
+ * 
+ * Architecture:
+ * - HTF (4h): Trend context filtering only
+ * - LTF (1h): Entry/Exit execution logic
+ * 
+ * Responsibilities:
+ * - Only decide WHEN to enter/exit based on indicators
+ * - No position sizing (handled by RiskManager)
+ * - No account equity access
+ * - Deterministic & backtest-safe
  */
 
-import {
-  Kline,
-  IndicatorData,
-  TrendSignal,
-  EntrySignal,
-  PositionSide,
-  Position,
-} from "../types";
-import { Indicators } from "../data/indicators";
-import { Config } from "../config";
+/**
+ * Determine HTF trend state (4h)
+ * BULL: EMA50 > EMA200 AND ADX > 20
+ * Otherwise: RANGE / non-bullish environment
+ */
+export function getHTFTrendState(htfIndicator: HTFIndicatorData): HTFTrendState {
+  const { ema50, ema200, adx } = htfIndicator;
 
-export class TrendStrategy {
-  private config: Config;
-
-  constructor(config: Config) {
-    this.config = config;
+  // Safety check
+  if (ema50 === undefined || ema200 === undefined || adx === undefined) {
+    return "RANGE";
   }
 
-  /**
-   * Determine trend direction from 4h timeframe
-   * EMA50 > EMA200 → long trend
-   * EMA50 < EMA200 → short trend
-   * Otherwise → no trend
-   */
-  detectTrend(indicators: IndicatorData[]): TrendSignal {
-    const latest = indicators[indicators.length - 1];
-
-    if (!latest.ema50 || !latest.ema200) {
-      return { trend: "none", timestamp: Date.now() };
-    }
-
-    let trend: PositionSide = "none";
-    if (latest.ema50 > latest.ema200) {
-      trend = "long";
-    } else if (latest.ema50 < latest.ema200) {
-      trend = "short";
-    }
-
-    return { trend, timestamp: Date.now() };
+  // BULL condition: EMA50 > EMA200 AND ADX > 20
+  if (ema50 > ema200 && adx > 20) {
+    return "BULL";
   }
 
-  /**
-   * Check entry conditions for long position
-   */
-  private checkLongEntry(
-    klines: Kline[],
-    indicators: IndicatorData[],
-    trend: PositionSide,
-    currentIndex: number
-  ): EntrySignal | null {
-    const cfg = this.config.strategy;
+  // Otherwise: RANGE / non-bullish
+  return "RANGE";
+}
 
-    // Condition 1: 4h must be in long trend
-    if (trend !== "long") {
-      return null;
-    }
+/**
+ * Get HTF context for strategy decision
+ */
+export function getHTFContext(htfIndicator: HTFIndicatorData): HTFContext {
+  return {
+    trendState: getHTFTrendState(htfIndicator),
+    indicators: htfIndicator,
+  };
+}
 
-    const current = indicators[currentIndex];
-    const currentKline = klines[currentIndex];
+/**
+ * Multi-Timeframe Trend Strategy (4h + 1h)
+ * 
+ * ENTRY Rules (1h, with 4h filter):
+ * 1. PositionState === FLAT
+ * 2. 4h trend state === BULL
+ * 3. ADX_1h > 25
+ * 4. EMA20_1h > EMA50_1h
+ * 
+ * EXIT Rules (1h only):
+ * - PositionState === OPEN
+ * - EMA20_1h < EMA50_1h
+ * 
+ * Note: 4h trend is NOT used for EXIT decisions
+ */
+export function trendStrategy(
+  context: {
+    bar: Kline;
+    htfIndicator: HTFIndicatorData;
+    ltfIndicator: LTFIndicatorData;
+    positionState: PositionState;
+  }
+): StrategySignal {
+  const { htfIndicator, ltfIndicator, positionState } = context;
 
-    // Condition 2: 1h EMA20 > EMA50
-    if (!current.ema20 || !current.ema50 || current.ema20 <= current.ema50) {
-      return null;
-    }
-
-    // Condition 3: Price breaks above highest high of last N bars
-    const highestHigh = Indicators.getHighestHigh(klines, cfg.lookbackPeriod, currentIndex - 1);
-    if (currentKline.close <= highestHigh) {
-      return null;
-    }
-
-    // All conditions met - generate entry signal
-    const atr = current.atr || 0;
-    const stopLoss = currentKline.close - cfg.stopLossMultiplier * atr;
-
-    return {
-      side: "long",
-      price: currentKline.close,
-      timestamp: currentKline.closeTime,
-      reason: `Long entry: 4h trend=long, 1h EMA20>EMA50, price broke above ${highestHigh.toFixed(2)}`,
-      stopLoss,
-      atr,
-    };
+  // Safety check: ensure indicators are available
+  if (!htfIndicator || !ltfIndicator) {
+    return { type: "HOLD" };
   }
 
-  /**
-   * Check entry conditions for short position
-   */
-  private checkShortEntry(
-    klines: Kline[],
-    indicators: IndicatorData[],
-    trend: PositionSide,
-    currentIndex: number
-  ): EntrySignal | null {
-    const cfg = this.config.strategy;
+  const { ema20, ema50, adx: adx1h } = ltfIndicator;
+  const { ema50: ema50_4h, ema200, adx: adx4h } = htfIndicator;
 
-    // Condition 1: 4h must be in short trend
-    if (trend !== "short") {
-      return null;
-    }
-
-    const current = indicators[currentIndex];
-    const currentKline = klines[currentIndex];
-
-    // Condition 2: 1h EMA20 < EMA50
-    if (!current.ema20 || !current.ema50 || current.ema20 >= current.ema50) {
-      return null;
-    }
-
-    // Condition 3: Price breaks below lowest low of last N bars
-    const lowestLow = Indicators.getLowestLow(klines, cfg.lookbackPeriod, currentIndex - 1);
-    if (currentKline.close >= lowestLow) {
-      return null;
-    }
-
-    // All conditions met - generate entry signal
-    const atr = current.atr || 0;
-    const stopLoss = currentKline.close + cfg.stopLossMultiplier * atr;
-
-    return {
-      side: "short",
-      price: currentKline.close,
-      timestamp: currentKline.closeTime,
-      reason: `Short entry: 4h trend=short, 1h EMA20<EMA50, price broke below ${lowestLow.toFixed(2)}`,
-      stopLoss,
-      atr,
-    };
+  // Ensure required LTF indicators are available
+  if (
+    ema20 === undefined ||
+    ema50 === undefined ||
+    adx1h === undefined
+  ) {
+    return { type: "HOLD" };
   }
 
-  /**
-   * Check for entry signals
-   */
-  checkEntry(
-    trendKlines: Kline[],
-    trendIndicators: IndicatorData[],
-    signalKlines: Kline[],
-    signalIndicators: IndicatorData[],
-    currentIndex: number
-  ): EntrySignal | null {
-    // First, detect trend from 4h timeframe
-    const trend = this.detectTrend(trendIndicators);
-
-    // Check long entry
-    const longSignal = this.checkLongEntry(signalKlines, signalIndicators, trend.trend, currentIndex);
-    if (longSignal) {
-      return longSignal;
-    }
-
-    // Check short entry
-    const shortSignal = this.checkShortEntry(signalKlines, signalIndicators, trend.trend, currentIndex);
-    if (shortSignal) {
-      return shortSignal;
-    }
-
-    return null;
-  }
-
-  /**
-   * Check if position should be exited
-   * Returns exit reason or null if should hold
-   */
-  checkExit(
-    position: Position,
-    currentPrice: number,
-    currentKline: Kline,
-    trendKlines: Kline[],
-    trendIndicators: IndicatorData[],
-    signalIndicators: IndicatorData[],
-    currentIndex: number
-  ): { shouldExit: boolean; reason: string } {
-    const cfg = this.config.strategy;
-    const signal = signalIndicators[currentIndex];
-
-    /**
-     * 1️⃣ HARD STOP —— 风险控制（第一优先级）
-     */
-    if (position.side === "long" && currentPrice <= position.stopLoss) {
-      return {
-        shouldExit: true,
-        reason: `Stop loss hit at ${position.stopLoss.toFixed(2)}`,
-      };
-    }
-    if (position.side === "short" && currentPrice >= position.stopLoss) {
-      return {
-        shouldExit: true,
-        reason: `Stop loss hit at ${position.stopLoss.toFixed(2)}`,
-      };
-    }
-
-    /**
-     * 2️⃣ PROFIT ACTIVATION —— 盈利未达到阈值，不启用 trailing
-     */
-    const entryPrice = position.entryPrice;
-    const atr = position.entryAtr;
-    const profitR =
-      position.side === "long"
-        ? (currentPrice - entryPrice) / atr
-        : (entryPrice - currentPrice) / atr;
-
-    if (profitR < cfg.trailingActivationR) {
-      return { shouldExit: false, reason: "" };
-    }
-
-    /**
-     * 3️⃣ TRAILING STOP —— 锁利润，但让趋势跑
-     */
-    if (position.side === "long") {
-      const highestPrice = Math.max(position.highestPrice, currentPrice);
-      const trailingStop = highestPrice - cfg.trailingStopATR * atr;
-      
-      if (currentPrice <= trailingStop) {
+  // Ensure required HTF indicators are available (for ENTRY only)
+  if (
+    ema50_4h === undefined ||
+    ema200 === undefined ||
+    adx4h === undefined
+  ) {
+    // If HTF indicators are missing, we can still check EXIT
+    // but cannot make ENTRY decisions
+    if (positionState === "OPEN") {
+      // EXIT check (doesn't require HTF)
+      if (ema20 < ema50) {
         return {
-          shouldExit: true,
-          reason: `Trailing stop hit: price ${currentPrice.toFixed(2)} <= trailing stop ${trailingStop.toFixed(2)}`,
-        };
-      }
-    } else if (position.side === "short") {
-      const lowestPrice = Math.min(position.lowestPrice, currentPrice);
-      const trailingStop = lowestPrice + cfg.trailingStopATR * atr;
-      
-      if (currentPrice >= trailingStop) {
-        return {
-          shouldExit: true,
-          reason: `Trailing stop hit: price ${currentPrice.toFixed(2)} >= trailing stop ${trailingStop.toFixed(2)}`,
+          type: "EXIT",
+          reason: "EMA_REVERSAL_1H" as TradeReason,
         };
       }
     }
+    return { type: "HOLD" };
+  }
 
-    /**
-     * 4️⃣ TREND EXIT —— 只有“明确反转”才走
-     */
-    const trend = this.detectTrend(trendIndicators);
-  
+  /* =========================
+   * EXIT Rules (check first when position exists)
+   * ========================= */
+  if (positionState === "OPEN") {
+    // EXIT: EMA20_1h < EMA50_1h
+    // Note: 4h trend is NOT used for EXIT
+    if (ema20 < ema50) {
+      return {
+        type: "EXIT",
+        reason: "EMA_REVERSAL_1H" as TradeReason,
+      };
+    }
+    // Otherwise hold
+    return { type: "HOLD" };
+  }
+
+  /* =========================
+   * ENTRY Rules (only when FLAT)
+   * ========================= */
+  if (positionState === "FLAT") {
+    // Get HTF trend state
+    const htfContext = getHTFContext(htfIndicator);
+    
+    // ENTRY conditions (all must be true):
+    // 1. 4h trend state === BULL
+    // 2. ADX_1h > 25
+    // 3. EMA20_1h > EMA50_1h
     if (
-      (position.side === "long" && trend.trend === "short") ||
-      (position.side === "short" && trend.trend === "long")
+      htfContext.trendState === "BULL" &&
+      adx1h > 25 &&
+      ema20 > ema50
     ) {
       return {
-        shouldExit: true,
-        reason: `4h trend reversed to ${trend.trend}`,
+        type: "ENTRY",
+        side: "LONG",
+        reason: "HTF_BULL_TREND_CONFIRMED" as TradeReason,
       };
     }
-
-  /**
-   * 5️⃣ NO TIME EXIT —— 趋势系统不看时间
-   */
-    return { shouldExit: false, reason: "" };
   }
 
-  /**
-   * Update position tracking (highest/lowest price, bars held)
-   */
-  updatePosition(position: Position, currentPrice: number): Position {
-    return {
-      ...position,
-      highestPrice: position.side === "long" 
-        ? Math.max(position.highestPrice, currentPrice)
-        : position.highestPrice,
-      lowestPrice: position.side === "short"
-        ? Math.min(position.lowestPrice, currentPrice)
-        : position.lowestPrice,
-      barsHeld: position.barsHeld + 1,
-    };
-  }
+  // Default: HOLD
+  return { type: "HOLD" };
 }

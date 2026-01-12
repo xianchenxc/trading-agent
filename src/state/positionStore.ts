@@ -1,144 +1,113 @@
+import { Position, TradeReason, PositionSide, PositionState } from '../types';
+
+type PositionAction =
+  | {
+      type: 'OPEN_POSITION';
+      payload: {
+        side: PositionSide;
+        entryPrice: number;
+        stopLoss: number;
+        size: number;
+        entryTime: number;
+      };
+      reason: TradeReason;
+    }
+  | {
+      type: 'UPDATE_STOP';
+      payload: {
+        stopLoss?: number;
+        trailingStop?: number;
+      };
+      reason: TradeReason;
+    }
+  | {
+      type: 'CLOSE_POSITION';
+      payload: {
+        exitPrice: number;
+        exitTime: number;
+      };
+      reason: TradeReason;
+    }
+  | {
+      type: 'START_CLOSING';
+    };
+
 /**
- * Position state management
- * Tracks current positions and account state
+ * Position Store with FSM (FLAT / OPEN / CLOSING)
  */
-
-import { Position, AccountState, Trade, PositionSide } from "../types";
-
 export class PositionStore {
-  private accountState: AccountState;
+  private position: Position | null = null;
+  private state: PositionState = "FLAT";
 
-  constructor(initialEquity: number) {
-    this.accountState = {
-      equity: initialEquity,
-      availableBalance: initialEquity,
-      positions: [],
-      trades: [],
-      consecutiveLosses: 0,
-      isInCooldown: false,
-    };
+  /**
+   * Get current position
+   */
+  get(): Position | null {
+    return this.position;
   }
 
   /**
-   * Get current account state
+   * Get current position state
    */
-  getAccountState(): AccountState {
-    return { ...this.accountState };
+  getState(): PositionState {
+    return this.state;
   }
 
   /**
-   * Get current positions
+   * Dispatch action to update position state
    */
-  getPositions(): Position[] {
-    return [...this.accountState.positions];
-  }
+  dispatch(action: PositionAction) {
+    switch (action.type) {
+      case 'OPEN_POSITION': {
+        if (this.position || this.state !== "FLAT") {
+          throw new Error('Position already exists or state is not FLAT');
+        }
 
-  /**
-   * Get active positions (non-none)
-   */
-  getActivePositions(): Position[] {
-    return this.accountState.positions.filter((p) => p.side !== "none");
-  }
+        this.position = {
+          side: action.payload.side,
+          entryPrice: action.payload.entryPrice,
+          stopLoss: action.payload.stopLoss,
+          trailingStop: undefined,
+          size: action.payload.size,
+          entryTime: action.payload.entryTime,
+          reason: action.reason,
+        };
+        this.state = "OPEN";
+        break;
+      }
 
-  /**
-   * Open a new position
-   */
-  openPosition(position: Position): void {
-    this.accountState.positions.push(position);
-    this.accountState.availableBalance -= position.quantity * position.entryPrice;
-  }
+      case 'UPDATE_STOP': {
+        if (!this.position || this.state !== "OPEN") return;
 
-  /**
-   * Close a position
-   */
-  closePosition(
-    positionIndex: number,
-    exitPrice: number,
-    exitTime: number,
-    exitReason: string,
-    commission: number
-  ): Trade | null {
-    if (positionIndex < 0 || positionIndex >= this.accountState.positions.length) {
-      return null;
+        if (action.payload.stopLoss !== undefined) {
+          this.position.stopLoss = action.payload.stopLoss;
+        }
+
+        if (action.payload.trailingStop !== undefined) {
+          this.position.trailingStop = action.payload.trailingStop;
+          // trailing stop 一旦存在，成为新的"有效止损"
+          this.position.stopLoss = action.payload.trailingStop;
+        }
+        break;
+      }
+
+      case 'START_CLOSING': {
+        if (this.state === "OPEN") {
+          this.state = "CLOSING";
+        }
+        break;
+      }
+
+      case 'CLOSE_POSITION': {
+        if (!this.position) return;
+
+        this.position = null;
+        this.state = "FLAT";
+        break;
+      }
+
+      default:
+        throw new Error('Unknown position action');
     }
-
-    const position = this.accountState.positions[positionIndex];
-    if (position.side === "none") {
-      return null;
-    }
-
-    // Calculate PnL
-    let pnl: number;
-    if (position.side === "long") {
-      pnl = (exitPrice - position.entryPrice) * position.quantity - commission * 2;
-    } else {
-      pnl = (position.entryPrice - exitPrice) * position.quantity - commission * 2;
-    }
-
-    const pnlPercent = (pnl / (position.entryPrice * position.quantity)) * 100;
-
-    // Create trade record
-    const trade: Trade = {
-      id: `trade_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-      side: position.side,
-      entryPrice: position.entryPrice,
-      exitPrice: exitPrice,
-      entryTime: position.entryTime,
-      exitTime: exitTime,
-      quantity: position.quantity,
-      pnl,
-      pnlPercent,
-      entryReason: "Strategy signal", // Could be enhanced
-      exitReason,
-      commission: commission * 2, // Entry + exit
-    };
-
-    // Update account
-    this.accountState.trades.push(trade);
-    this.accountState.equity += pnl;
-    this.accountState.availableBalance += position.quantity * exitPrice - commission;
-
-    // Remove position
-    this.accountState.positions.splice(positionIndex, 1);
-
-    return trade;
-  }
-
-  /**
-   * Update position (for tracking highest/lowest price, bars held)
-   */
-  updatePosition(positionIndex: number, updatedPosition: Position): void {
-    if (positionIndex >= 0 && positionIndex < this.accountState.positions.length) {
-      this.accountState.positions[positionIndex] = updatedPosition;
-    }
-  }
-
-  /**
-   * Update account equity (for external updates)
-   */
-  updateEquity(equity: number): void {
-    this.accountState.equity = equity;
-    this.accountState.availableBalance = equity;
-  }
-
-  /**
-   * Get all trades
-   */
-  getTrades(): Trade[] {
-    return [...this.accountState.trades];
-  }
-
-  /**
-   * Reset account state (for backtesting)
-   */
-  reset(initialEquity: number): void {
-    this.accountState = {
-      equity: initialEquity,
-      availableBalance: initialEquity,
-      positions: [],
-      trades: [],
-      consecutiveLosses: 0,
-      isInCooldown: false,
-    };
   }
 }

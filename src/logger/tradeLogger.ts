@@ -1,161 +1,108 @@
-/**
- * Trade logging module
- * Logs all trading activities with detailed information
- */
-
-import { Trade, EntrySignal, Position } from "../types";
-
-export enum LogLevel {
-  INFO = "INFO",
-  WARN = "WARN",
-  ERROR = "ERROR",
-  DEBUG = "DEBUG",
-}
-
-export interface LogEntry {
-  timestamp: number;
-  level: LogLevel;
-  message: string;
-  data?: any;
-}
+import { Kline, Position, TradeAction, TradeReason, BacktestResult, TradeRecord } from '../types';
 
 export class TradeLogger {
-  private logs: LogEntry[] = [];
-  private consoleOutput: boolean;
+  private trades: TradeRecord[] = [];
+  private initialCapital: number = 0;
+  private currentEquity: number = 0;
 
-  constructor(consoleOutput: boolean = true) {
-    this.consoleOutput = consoleOutput;
+  setInitialCapital(capital: number) {
+    this.initialCapital = capital;
+    this.currentEquity = capital;
   }
 
-  private log(level: LogLevel, message: string, data?: any): void {
-    const entry: LogEntry = {
-      timestamp: Date.now(),
-      level,
-      message,
-      data,
-    };
-
-    this.logs.push(entry);
-
-    if (this.consoleOutput) {
-      const timestamp = new Date(entry.timestamp).toISOString();
-      const prefix = `[${timestamp}] [${level}]`;
-      
-      if (data) {
-        console.log(`${prefix} ${message}`, data);
-      } else {
-        console.log(`${prefix} ${message}`);
-      }
-    }
+  getCurrentEquity(): number {
+    return this.currentEquity;
   }
 
-  info(message: string, data?: any): void {
-    this.log(LogLevel.INFO, message, data);
+  logEntry(bar: Kline, action: TradeAction) {
+    console.log(
+      `[ENTRY] ${action.side} @ ${bar.close} | reason=${action.reason}`
+    );
   }
 
-  warn(message: string, data?: any): void {
-    this.log(LogLevel.WARN, message, data);
-  }
+  logExit(bar: Kline, position: Position, reason: TradeReason) {
+    const entryValue = position.entryPrice * position.size;
+    const exitValue = bar.close * position.size;
+    const pnl =
+      position.side === 'LONG'
+        ? exitValue - entryValue
+        : entryValue - exitValue;
 
-  error(message: string, data?: any): void {
-    this.log(LogLevel.ERROR, message, data);
-  }
+    // Update equity
+    this.currentEquity += pnl;
 
-  debug(message: string, data?: any): void {
-    this.log(LogLevel.DEBUG, message, data);
-  }
-
-  /**
-   * Log entry signal
-   */
-  logEntrySignal(signal: EntrySignal, quantity: number): void {
-    this.info("Entry signal generated", {
-      side: signal.side,
-      price: signal.price,
-      stopLoss: signal.stopLoss,
-      atr: signal.atr,
-      quantity,
-      reason: signal.reason,
-    });
-  }
-
-  /**
-   * Log position opened
-   */
-  logPositionOpened(position: Position): void {
-    this.info("Position opened", {
+    const trade: TradeRecord = {
       side: position.side,
       entryPrice: position.entryPrice,
-      quantity: position.quantity,
-      stopLoss: position.stopLoss,
-      entryTime: new Date(position.entryTime).toISOString(),
-    });
+      entryTime: position.entryTime,
+      exitPrice: bar.close,
+      exitTime: bar.closeTime,
+      size: position.size,
+      pnl,
+      commission: 0, // TODO: Calculate commission
+      slippage: 0, // TODO: Calculate slippage
+      equityAfterTrade: this.currentEquity,
+      reason: reason,
+    };
+
+    this.trades.push(trade);
+
+    console.log(
+      `[EXIT] ${position.side} @ ${bar.close} | PnL=${pnl.toFixed(
+        2
+      )} | reason=${reason}`
+    );
   }
 
-  /**
-   * Log position closed
-   */
-  logPositionClosed(trade: Trade): void {
-    const pnlSign = trade.pnl >= 0 ? "+" : "";
-    this.info(`Position closed - PnL: ${pnlSign}${trade.pnl.toFixed(2)} (${pnlSign}${trade.pnlPercent.toFixed(2)}%)`, {
-      side: trade.side,
-      entryPrice: trade.entryPrice,
-      exitPrice: trade.exitPrice,
-      quantity: trade.quantity,
-      pnl: trade.pnl,
-      pnlPercent: trade.pnlPercent,
-      entryReason: trade.entryReason,
-      exitReason: trade.exitReason,
-      commission: trade.commission,
-      duration: `${((trade.exitTime - trade.entryTime) / (1000 * 60 * 60)).toFixed(2)} hours`,
-    });
+  getResults(): BacktestResult {
+    const totalTrades = this.trades.length;
+    const wins = this.trades.filter(t => t.pnl > 0);
+    const losses = this.trades.filter(t => t.pnl < 0);
+    const winRate = totalTrades > 0 ? (wins.length / totalTrades) * 100 : 0;
+    
+    const totalWin = wins.reduce((sum, t) => sum + t.pnl, 0);
+    const totalLoss = Math.abs(losses.reduce((sum, t) => sum + t.pnl, 0));
+    const profitFactor = totalLoss > 0 ? totalWin / totalLoss : 0;
+    
+    const avgWin = wins.length > 0 ? totalWin / wins.length : 0;
+    const avgLoss = losses.length > 0 ? totalLoss / losses.length : 0;
+    const expectancy = totalTrades > 0 ? (totalWin + totalLoss) / totalTrades : 0;
+
+    // Calculate max drawdown
+    let maxEquity = this.initialCapital;
+    let maxDrawdown = 0;
+    for (const trade of this.trades) {
+      if (trade.equityAfterTrade > maxEquity) {
+        maxEquity = trade.equityAfterTrade;
+      }
+      const drawdown = maxEquity - trade.equityAfterTrade;
+      if (drawdown > maxDrawdown) {
+        maxDrawdown = drawdown;
+      }
+    }
+
+    return {
+      initialCapital: this.initialCapital,
+      finalEquity: this.currentEquity,
+      trades: this.trades,
+      stats: {
+        totalTrades,
+        winRate,
+        expectancy,
+        maxDrawdown,
+        profitFactor,
+      },
+    };
   }
 
-  /**
-   * Log risk management event
-   */
-  logRiskEvent(message: string, data?: any): void {
-    this.warn(`Risk Management: ${message}`, data);
-  }
-
-  /**
-   * Log strategy event
-   */
-  logStrategyEvent(message: string, data?: any): void {
-    this.debug(`Strategy: ${message}`, data);
-  }
-
-  /**
-   * Get all logs
-   */
-  getLogs(): LogEntry[] {
-    return [...this.logs];
-  }
-
-  /**
-   * Get logs by level
-   */
-  getLogsByLevel(level: LogLevel): LogEntry[] {
-    return this.logs.filter((log) => log.level === level);
-  }
-
-  /**
-   * Clear logs
-   */
-  clear(): void {
-    this.logs = [];
-  }
-
-  /**
-   * Export logs to string
-   */
-  exportLogs(): string {
-    return this.logs
-      .map((log) => {
-        const timestamp = new Date(log.timestamp).toISOString();
-        const dataStr = log.data ? ` ${JSON.stringify(log.data)}` : "";
-        return `[${timestamp}] [${log.level}] ${log.message}${dataStr}`;
-      })
-      .join("\n");
+  printSummary() {
+    const results = this.getResults();
+    console.log('====================');
+    console.log('Backtest Summary');
+    console.log('====================');
+    console.log(`Trades: ${results.stats.totalTrades}`);
+    console.log(`Win rate: ${results.stats.winRate.toFixed(2)}%`);
+    console.log(`Final Equity: ${results.finalEquity.toFixed(2)}`);
+    console.log(`Max Drawdown: ${results.stats.maxDrawdown.toFixed(2)}`);
   }
 }

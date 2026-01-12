@@ -6,6 +6,7 @@
 import { DataFetcher } from "./data/fetcher";
 import { BacktestEngine } from "./backtest/backtestEngine";
 import { defaultConfig, Config } from "./config";
+import { HTFIndicatorData } from "./types";
 
 async function main() {
   const args = process.argv.slice(2);
@@ -42,53 +43,99 @@ async function runBacktest(config: Config) {
     // For backtest, we need data from the past
     // Let's use a reasonable time range (e.g., last 3 months)
     const endTime = Date.now();
-    const startTime = endTime - 90 * 24 * 60 * 60 * 1000; // 90 days ago
+    const startTime = endTime - 360 * 24 * 60 * 60 * 1000; // 180 days ago
 
-    // Fetch 4h klines for trend detection
-    console.log("Fetching 4h klines...");
-    const trendKlines = await fetcher.fetchKlinesForBacktest(
+    // Fetch both HTF (4h) and LTF (1h) klines
+    console.log(`Fetching ${config.timeframe.trend} klines (HTF)...`);
+    const htfKlines = await fetcher.fetchKlinesForBacktest(
       config.exchange.symbol,
-      config.strategy.trendTimeframe,
+      config.timeframe.trend,
       startTime,
       endTime
     );
-    console.log(`Fetched ${trendKlines.length} 4h klines`);
+    console.log(`Fetched ${htfKlines.length} ${config.timeframe.trend} klines`);
 
-    // Fetch 1h klines for entry signals
-    console.log("Fetching 1h klines...");
-    const signalKlines = await fetcher.fetchKlinesForBacktest(
+    console.log(`Fetching ${config.timeframe.signal} klines (LTF)...`);
+    const ltfKlines = await fetcher.fetchKlinesForBacktest(
       config.exchange.symbol,
-      config.strategy.signalTimeframe,
+      config.timeframe.signal,
       startTime,
       endTime
     );
-    console.log(`Fetched ${signalKlines.length} 1h klines`);
+    console.log(`Fetched ${ltfKlines.length} ${config.timeframe.signal} klines`);
     console.log();
 
-    if (trendKlines.length === 0 || signalKlines.length === 0) {
+    if (htfKlines.length === 0 || ltfKlines.length === 0) {
       console.error("Error: No historical data fetched");
       process.exit(1);
     }
 
-    // Run backtest
+    // Calculate indicators for both timeframes
+    const { buildHTFIndicators, buildLTFIndicators } = await import("./indicators/indicators");
+    console.log("Calculating indicators...");
+    const htfIndicators = buildHTFIndicators(htfKlines, config.indicators);
+    const ltfIndicators = buildLTFIndicators(ltfKlines, config.indicators);
+
+    // Map HTF indicators to LTF bars (time alignment)
+    // For each 1h bar, find the corresponding 4h bar that has closed
+    // A 4h bar is considered "closed" if its closeTime < 1h bar's openTime
+    // This ensures we only use fully closed 4h bars (no lookahead bias)
+    const mappedHTFIndicators: HTFIndicatorData[] = [];
+    
+    for (const ltfBar of ltfKlines) {
+      // Find the most recent 4h bar that has closed before this 1h bar starts
+      // Use strict < to avoid using the current 4h bar that might still be forming
+      let matchedHTFIndicator: HTFIndicatorData | null = null;
+      
+      for (let i = htfKlines.length - 1; i >= 0; i--) {
+        const htfBar = htfKlines[i];
+        // 4h bar is closed if its closeTime < 1h bar's openTime
+        // This ensures we only use fully closed 4h bars
+        if (htfBar.closeTime < ltfBar.openTime) {
+          matchedHTFIndicator = htfIndicators[i];
+          break;
+        }
+      }
+      
+      // If no matching 4h bar found, use undefined (will result in HOLD signal)
+      mappedHTFIndicators.push(matchedHTFIndicator || {
+        ema50: undefined,
+        ema200: undefined,
+        adx: undefined,
+      });
+    }
+
+    // Run backtest with multi-timeframe data
     console.log("Running backtest...");
     console.log();
-    const results = await engine.run(trendKlines, signalKlines);
+    const results = engine.run(
+      ltfKlines,
+      mappedHTFIndicators,
+      ltfIndicators
+    );
 
     // Display results
     console.log();
     console.log("=".repeat(60));
     console.log("Backtest Results");
     console.log("=".repeat(60));
-    console.log(`Total Return: $${results.totalReturn.toFixed(2)} (${results.totalReturnPercent.toFixed(2)}%)`);
-    console.log(`Max Drawdown: $${results.maxDrawdown.toFixed(2)} (${results.maxDrawdownPercent.toFixed(2)}%)`);
-    console.log(`Total Trades: ${results.totalTrades}`);
-    console.log(`Winning Trades: ${results.winningTrades}`);
-    console.log(`Losing Trades: ${results.losingTrades}`);
-    console.log(`Win Rate: ${results.winRate.toFixed(2)}%`);
-    console.log(`Profit Factor: ${results.profitFactor.toFixed(2)}`);
-    console.log(`Average Win: $${results.avgWin.toFixed(2)}`);
-    console.log(`Average Loss: $${results.avgLoss.toFixed(2)}`);
+    const totalReturn = results.finalEquity - results.stats.totalTrades * 0; // Simplified
+    const totalReturnPercent = ((results.finalEquity - config.backtest.initialCapital) / config.backtest.initialCapital) * 100;
+    const winningTrades = results.trades.filter(t => t.pnl > 0).length;
+    const losingTrades = results.trades.filter(t => t.pnl < 0).length;
+    const avgWin = winningTrades > 0 ? results.trades.filter(t => t.pnl > 0).reduce((sum, t) => sum + t.pnl, 0) / winningTrades : 0;
+    const avgLoss = losingTrades > 0 ? Math.abs(results.trades.filter(t => t.pnl < 0).reduce((sum, t) => sum + t.pnl, 0) / losingTrades) : 0;
+
+    console.log(`Total Return: $${totalReturn.toFixed(2)} (${totalReturnPercent.toFixed(2)}%)`);
+    const maxDrawdownPercent = (results.stats.maxDrawdown / config.backtest.initialCapital) * 100;
+    console.log(`Max Drawdown: $${results.stats.maxDrawdown.toFixed(2)} (${maxDrawdownPercent.toFixed(2)}%)`);
+    console.log(`Total Trades: ${results.stats.totalTrades}`);
+    console.log(`Winning Trades: ${winningTrades}`);
+    console.log(`Losing Trades: ${losingTrades}`);
+    console.log(`Win Rate: ${results.stats.winRate.toFixed(2)}%`);
+    console.log(`Profit Factor: ${results.stats.profitFactor.toFixed(2)}`);
+    console.log(`Average Win: $${avgWin.toFixed(2)}`);
+    console.log(`Average Loss: $${avgLoss.toFixed(2)}`);
     console.log("=".repeat(60));
     console.log();
 
@@ -99,23 +146,20 @@ async function runBacktest(config: Config) {
       const recentTrades = results.trades.slice(-10).reverse();
       for (const trade of recentTrades) {
         const pnlSign = trade.pnl >= 0 ? "+" : "";
+        const pnlPercent = ((trade.exitPrice - trade.entryPrice) / trade.entryPrice) * 100 * (trade.side === 'LONG' ? 1 : -1);
         console.log(
-          `${trade.side.toUpperCase().padEnd(5)} | ` +
+          `${trade.side.padEnd(5)} | ` +
           `Entry: $${trade.entryPrice.toFixed(2)} | ` +
           `Exit: $${trade.exitPrice.toFixed(2)} | ` +
-          `PnL: ${pnlSign}$${trade.pnl.toFixed(2)} (${pnlSign}${trade.pnlPercent.toFixed(2)}%) | ` +
-          `Reason: ${trade.exitReason}`
+          `PnL: ${pnlSign}$${trade.pnl.toFixed(2)} (${pnlSign}${pnlPercent.toFixed(2)}%) | ` +
+          `Reason: ${trade.reason}`
         );
       }
       console.log("-".repeat(60));
     }
 
-    // Export logs
-    const logger = engine.getLogger();
-    const logOutput = logger.exportLogs();
-    
-    // Optionally save logs to file
-    // fs.writeFileSync('backtest.log', logOutput);
+    // Print summary
+    results.stats && console.log();
     
   } catch (error: any) {
     console.error("Backtest failed:", error.message);
