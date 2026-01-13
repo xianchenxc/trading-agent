@@ -68,7 +68,8 @@ export class PositionStore {
         this.position = {
           side: action.payload.side,
           entryPrice: action.payload.entryPrice,
-          stopLoss: action.payload.stopLoss,
+          initialStopLoss: action.payload.stopLoss, // Store initial stop loss
+          stopLoss: action.payload.stopLoss, // Current stop loss (initially = initialStopLoss)
           trailingStop: undefined,
           size: action.payload.size,
           entryTime: action.payload.entryTime,

@@ -34,19 +34,14 @@ export interface Config {
   // Strategy logic parameters (decision thresholds)
   strategy: {
     lookbackPeriod: number; // N bars for breakout / structure
-
-    stopLoss: {
-      fixedPercent: number; // e.g. 0.01 (1% fixed stop loss)
-    };
-
-    trailingStop: {
-      activationR: number; // e.g. 1.0 (activate at +1R)
-    };
   };
 
   // Risk management
   risk: {
     maxRiskPerTrade: number;      // e.g. 0.01 (1%)
+    initialStopPct: number;       // e.g. 0.01 (1%)
+    breakEvenR: number;           // e.g. 1.0 (move to break-even at +1R)
+    trailingActivationR: number;   // e.g. 2.0 (activate trailing stop at +2R)
   };
 
   // Backtest settings
@@ -68,7 +63,7 @@ export interface Config {
 export const defaultConfig: Config = {
   exchange: {
     baseUrl: "https://api.binance.com",
-    symbol: "BTCUSDT",
+    symbol: "ETHUSDT",
   },
 
   timeframe: {
@@ -93,18 +88,13 @@ export const defaultConfig: Config = {
 
   strategy: {
     lookbackPeriod: 20,
-
-    stopLoss: {
-      fixedPercent: 0.01, // 1% fixed stop loss
-    },
-
-    trailingStop: {
-      activationR: 1.0, // Activate trailing stop at +1R
-    },
   },
 
   risk: {
     maxRiskPerTrade: 0.01, // 1%
+    initialStopPct: 0.01, // 1% initial stop loss
+    breakEvenR: 1.0, // Move to break-even at +1R
+    trailingActivationR: 2.0, // Activate trailing stop at +2R (v4: Delayed Trailing Stop)
   },
 
   backtest: {

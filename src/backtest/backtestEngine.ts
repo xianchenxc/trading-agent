@@ -66,11 +66,12 @@ export class BacktestEngine {
         this.config
       );
 
-      // Handle trailing stop updates
+      // Handle trailing stop updates (v4: includes break-even stopLoss updates)
       if (riskResult.trailingUpdate.shouldUpdate) {
         this.positionStore.dispatch({
           type: 'UPDATE_STOP',
           payload: {
+            stopLoss: riskResult.trailingUpdate.stopLoss,
             trailingStop: riskResult.trailingUpdate.trailingStop,
             isTrailingActive: riskResult.trailingUpdate.isTrailingActive,
             maxUnrealizedR: riskResult.trailingUpdate.maxUnrealizedR,
@@ -124,9 +125,9 @@ export class BacktestEngine {
     const entryPrice = bar.close;
     const equity = this.logger.getCurrentEquity();
     const riskPerTrade = this.config.risk.maxRiskPerTrade;
-    const stopLossPercent = this.config.strategy.stopLoss.fixedPercent;
+    const stopLossPercent = this.config.risk.initialStopPct;
 
-    // Calculate position size and stop loss using RiskManager (v3: 1% fixed stop)
+    // Calculate position size and stop loss using RiskManager (v4: initial stop loss)
     const { size, stopLoss } = calculatePositionSize(
       entryPrice,
       equity,

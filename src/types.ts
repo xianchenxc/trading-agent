@@ -76,6 +76,7 @@ export type PositionSide = "LONG" | "SHORT";
 export type TradeReason =
   | 'TREND_INVALIDATED'
   | 'STOP_LOSS_INITIAL'
+  | 'STOP_LOSS_BREAK_EVEN'
   | 'TRAILING_STOP'
   | 'TRAILING_STOP_HIT'
   | 'MANUAL_EXIT'
@@ -103,15 +104,16 @@ export interface Position {
   side: PositionSide;
 
   entryPrice: number;
-  stopLoss: number; // Initial stop loss (hard stop)
-  trailingStop?: number; // Trailing stop level (based on EMA20_1H)
+  initialStopLoss: number; // Initial stop loss (hard stop, never changes)
+  stopLoss: number; // Current active stop loss (stage 1: initialStopLoss, stage 2: entryPrice, stage 3: trailingStop)
+  trailingStop?: number; // Trailing stop level (only used in stage 3, based on EMA20_1H)
 
   size: number;
 
   entryTime: number;
 
   // Trailing stop state
-  isTrailingActive: boolean; // Whether trailing stop is activated
+  isTrailingActive: boolean; // Whether trailing stop is activated (stage 3 only)
   maxUnrealizedR: number; // Maximum unrealized profit in R units
 
   // optional: 用于分析

@@ -13,7 +13,7 @@ export interface Exchange {
   /**
    * Place a market order to open a position
    */
-  openPosition(signal: StrategySignal, size: number): Promise<Position>;
+  openPosition(signal: StrategySignal, size: number, stopLoss: number): Promise<Position>;
 
   /**
    * Close a position at market price
@@ -51,9 +51,9 @@ export class SimulatedExchange implements Exchange {
     return this.currentPrice;
   }
 
-  async openPosition(signal: StrategySignal, size: number): Promise<Position> {
-    if (!signal.side || !signal.stopLoss) {
-      throw new Error("Invalid signal: missing side or stopLoss");
+  async openPosition(signal: StrategySignal, size: number, stopLoss: number): Promise<Position> {
+    if (!signal.side) {
+      throw new Error("Invalid signal: missing side");
     }
     
     // Apply slippage (simplified - would need current price)
@@ -62,9 +62,12 @@ export class SimulatedExchange implements Exchange {
     const position: Position = {
       side: signal.side,
       entryPrice: executionPrice,
+      initialStopLoss: stopLoss,
+      stopLoss: stopLoss,
       entryTime: Date.now(),
       size,
-      stopLoss: signal.stopLoss,
+      isTrailingActive: false,
+      maxUnrealizedR: 0,
     };
 
     return position;
@@ -125,7 +128,7 @@ export class BinanceExchange implements Exchange {
     throw new Error("Real exchange not implemented yet");
   }
 
-  async openPosition(signal: StrategySignal, size: number): Promise<Position> {
+  async openPosition(signal: StrategySignal, size: number, stopLoss: number): Promise<Position> {
     // TODO: Implement real order placement
     throw new Error("Real exchange not implemented yet");
   }
