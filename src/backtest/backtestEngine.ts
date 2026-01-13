@@ -46,7 +46,7 @@ export class BacktestEngine {
     return this.logger.getResults();
   }
 
-  private onBar({ bar, htfIndicator, ltfIndicator }: BacktestContext) {
+  private onBar({ bar, htfIndicator, ltfIndicator, index }: BacktestContext) {
     const position = this.positionStore.get();
     const positionState = this.positionStore.getState();
 

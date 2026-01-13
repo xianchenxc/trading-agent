@@ -82,7 +82,7 @@ async function runBacktest(config: Config) {
     const { buildHTFIndicators, buildLTFIndicators } = await import("./indicators/indicators");
     console.log("Calculating indicators...");
     const htfIndicators = buildHTFIndicators(htfKlines, config.indicators);
-    const ltfIndicators = buildLTFIndicators(ltfKlines, config.indicators);
+    const ltfIndicators = buildLTFIndicators(ltfKlines, config.indicators, config.strategy.lookbackPeriod);
 
     // Map HTF indicators to LTF bars (time alignment)
     // For each 1h bar, find the corresponding 4h bar that has closed

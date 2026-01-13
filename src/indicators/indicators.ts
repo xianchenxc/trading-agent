@@ -241,9 +241,13 @@ export function buildHTFIndicators(klines: Kline[], config: Config['indicators']
 
 /**
  * Build Lower Timeframe (LTF) indicators (1h)
- * Returns: EMA20, EMA50, ADX(14), ATR(14)
+ * Returns: EMA20, EMA50, ADX(14), ATR(14), Donchian High
  */
-export function buildLTFIndicators(klines: Kline[], config: Config['indicators']): LTFIndicatorData[] {
+export function buildLTFIndicators(
+  klines: Kline[], 
+  config: Config['indicators'],
+  donchianLookback: number = 20
+): LTFIndicatorData[] {
   const closes = klines.map(k => k.close);
 
   const ema20 = calculateEMA(closes, 20);
@@ -251,33 +255,60 @@ export function buildLTFIndicators(klines: Kline[], config: Config['indicators']
   const atr = calculateATR(klines, config.atr.period);
   const { adx } = calculateADX(klines, config.adx.period);
 
+  // Calculate Donchian High for each bar
+  const donchianHighs = klines.map((_, i) => 
+    getDonchianHigh(klines, donchianLookback, i)
+  );
+
   return klines.map((k, i) => ({
     ema20: ema20[i],
     ema50: ema50[i],
     adx: adx[i],
     atr: atr[i],
+    donchianHigh: donchianHighs[i],
   }));
 }
 
 /**
- * Indicators class for backward compatibility
+ * Get the highest high in the last N bars
  */
-export class Indicators {
-  /**
-   * Get the highest high in the last N bars
-   */
-  static getHighestHigh(klines: Kline[], lookback: number, currentIndex: number): number {
-    const start = Math.max(0, currentIndex - lookback + 1);
-    const end = currentIndex + 1;
-    return Math.max(...klines.slice(start, end).map((k) => k.high));
-  }
+export function getHighestHigh(klines: Kline[], lookback: number, currentIndex: number): number {
+  const start = Math.max(0, currentIndex - lookback + 1);
+  const end = currentIndex + 1;
+  return Math.max(...klines.slice(start, end).map((k) => k.high));
+}
 
-  /**
-   * Get the lowest low in the last N bars
-   */
-  static getLowestLow(klines: Kline[], lookback: number, currentIndex: number): number {
-    const start = Math.max(0, currentIndex - lookback + 1);
-    const end = currentIndex + 1;
-    return Math.min(...klines.slice(start, end).map((k) => k.low));
+/**
+ * Get the lowest low in the last N bars
+ */
+export function getLowestLow(klines: Kline[], lookback: number, currentIndex: number): number {
+  const start = Math.max(0, currentIndex - lookback + 1);
+  const end = currentIndex + 1;
+  return Math.min(...klines.slice(start, end).map((k) => k.low));
+}
+
+/**
+ * Get Donchian High (highest high of completed bars only)
+ * Excludes the current bar to avoid lookahead bias
+ * @param klines Array of K-lines
+ * @param lookback Number of bars to look back (default: 20)
+ * @param currentIndex Current bar index
+ * @returns Highest high of the last N completed bars, or undefined if insufficient data
+ */
+export function getDonchianHigh(klines: Kline[], lookback: number, currentIndex: number): number | undefined {
+  // Donchian High uses only completed bars (exclude current bar)
+  // Range: [currentIndex - lookback, currentIndex - 1]
+  const start = Math.max(0, currentIndex - lookback);
+  const end = currentIndex; // Exclude current bar
+  
+  if (start >= end || end === 0) {
+    return undefined; // Insufficient historical data
   }
+  
+  const historicalBars = klines.slice(start, end);
+  if (historicalBars.length === 0) {
+    return undefined;
+  }
+  
+  return Math.max(...historicalBars.map((k) => k.high));
 }

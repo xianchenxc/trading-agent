@@ -61,6 +61,9 @@ export interface LTFIndicatorData {
   
   // ATR (used by RiskManager only)
   atr?: number;
+  
+  // Donchian High (used for breakout confirmation)
+  donchianHigh?: number;
 }
 
 /**
@@ -96,6 +99,7 @@ export type TradeReason =
   | 'TRAILING_STOP'
   | 'MANUAL_EXIT'
   | 'HTF_BULL_TREND_CONFIRMED'
+  | 'HTF_BULL_BREAKOUT_CONFIRMED'
   | 'EMA_REVERSAL_1H';
 
 export interface TradeAction {

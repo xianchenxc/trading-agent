@@ -10,7 +10,7 @@ import {
 } from "../types";
 
 /**
- * Multi-Timeframe Trend Strategy (v1)
+ * Multi-Timeframe Trend Strategy (v2)
  * 
  * Architecture:
  * - HTF (4h): Trend context filtering only
@@ -21,6 +21,10 @@ import {
  * - No position sizing (handled by RiskManager)
  * - No account equity access
  * - Deterministic & backtest-safe
+ * 
+ * v2 Changes:
+ * - Added Donchian High breakout confirmation for ENTRY
+ * - Reduces false entries before trend startup
  */
 
 /**
@@ -56,13 +60,14 @@ export function getHTFContext(htfIndicator: HTFIndicatorData): HTFContext {
 }
 
 /**
- * Multi-Timeframe Trend Strategy (4h + 1h)
+ * Multi-Timeframe Trend Strategy (4h + 1h) - MVP v2
  * 
  * ENTRY Rules (1h, with 4h filter):
  * 1. PositionState === FLAT
  * 2. 4h trend state === BULL
  * 3. ADX_1h > 25
  * 4. EMA20_1h > EMA50_1h
+ * 5. Close price breaks above Donchian High (lookback = 20)
  * 
  * EXIT Rules (1h only):
  * - PositionState === OPEN
@@ -78,14 +83,19 @@ export function trendStrategy(
     positionState: PositionState;
   }
 ): StrategySignal {
-  const { htfIndicator, ltfIndicator, positionState } = context;
+  const { 
+    bar, 
+    htfIndicator, 
+    ltfIndicator, 
+    positionState
+  } = context;
 
   // Safety check: ensure indicators are available
   if (!htfIndicator || !ltfIndicator) {
     return { type: "HOLD" };
   }
 
-  const { ema20, ema50, adx: adx1h } = ltfIndicator;
+  const { ema20, ema50, adx: adx1h, donchianHigh } = ltfIndicator;
   const { ema50: ema50_4h, ema200, adx: adx4h } = htfIndicator;
 
   // Ensure required LTF indicators are available
@@ -144,15 +154,27 @@ export function trendStrategy(
     // 1. 4h trend state === BULL
     // 2. ADX_1h > 25
     // 3. EMA20_1h > EMA50_1h
+    // 4. Close price breaks above Donchian High (trend startup confirmation)
+    
+    // Check Donchian High breakout
+    // v2: Donchian High breakout is mandatory for ENTRY
+    if (donchianHigh === undefined) {
+      // If donchianHigh is undefined (insufficient data), cannot make ENTRY decision
+      return { type: "HOLD" };
+    }
+    
+    const donchianHighBreakout = bar.close > donchianHigh;
+    
     if (
       htfContext.trendState === "BULL" &&
       adx1h > 25 &&
-      ema20 > ema50
+      ema20 > ema50 &&
+      donchianHighBreakout
     ) {
       return {
         type: "ENTRY",
         side: "LONG",
-        reason: "HTF_BULL_TREND_CONFIRMED" as TradeReason,
+        reason: "HTF_BULL_BREAKOUT_CONFIRMED" as TradeReason,
       };
     }
   }
