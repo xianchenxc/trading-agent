@@ -17,6 +17,8 @@ type PositionAction =
       payload: {
         stopLoss?: number;
         trailingStop?: number;
+        isTrailingActive?: boolean;
+        maxUnrealizedR?: number;
       };
       reason: TradeReason;
     }
@@ -70,6 +72,8 @@ export class PositionStore {
           trailingStop: undefined,
           size: action.payload.size,
           entryTime: action.payload.entryTime,
+          isTrailingActive: false,
+          maxUnrealizedR: 0,
           reason: action.reason,
         };
         this.state = "OPEN";
@@ -85,8 +89,15 @@ export class PositionStore {
 
         if (action.payload.trailingStop !== undefined) {
           this.position.trailingStop = action.payload.trailingStop;
-          // trailing stop 一旦存在，成为新的"有效止损"
-          this.position.stopLoss = action.payload.trailingStop;
+        }
+
+        // Update trailing stop state fields
+        if (action.payload.isTrailingActive !== undefined) {
+          this.position.isTrailingActive = action.payload.isTrailingActive;
+        }
+
+        if (action.payload.maxUnrealizedR !== undefined) {
+          this.position.maxUnrealizedR = action.payload.maxUnrealizedR;
         }
         break;
       }

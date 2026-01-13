@@ -10,14 +10,15 @@ import {
 } from "../types";
 
 /**
- * Multi-Timeframe Trend Strategy (v2)
+ * Multi-Timeframe Trend Strategy (v3)
  * 
  * Architecture:
  * - HTF (4h): Trend context filtering only
- * - LTF (1h): Entry/Exit execution logic
+ * - LTF (1h): Entry execution logic only
  * 
  * Responsibilities:
- * - Only decide WHEN to enter/exit based on indicators
+ * - Only decide WHEN to enter based on indicators
+ * - NO exit signals (v3: all exits handled by RiskManager via stop loss / trailing stop)
  * - No position sizing (handled by RiskManager)
  * - No account equity access
  * - Deterministic & backtest-safe
@@ -25,6 +26,12 @@ import {
  * v2 Changes:
  * - Added Donchian High breakout confirmation for ENTRY
  * - Reduces false entries before trend startup
+ * 
+ * v3 Changes:
+ * - Removed all EXIT signals (EMA_REVERSAL_1H, etc.)
+ * - Strategy only generates ENTRY signals
+ * - All exits are handled by RiskManager (stop loss / trailing stop)
+ * - Allows profits to run via Trailing Stop mechanism
  */
 
 /**
@@ -60,20 +67,25 @@ export function getHTFContext(htfIndicator: HTFIndicatorData): HTFContext {
 }
 
 /**
- * Multi-Timeframe Trend Strategy (4h + 1h) - MVP v2
+ * Multi-Timeframe Trend Strategy (4h + 1h) - MVP v3
  * 
- * ENTRY Rules (1h, with 4h filter):
+ * ENTRY Rules (1h, with 4h filter) - UNCHANGED from v2:
  * 1. PositionState === FLAT
- * 2. 4h trend state === BULL
+ * 2. 4h trend state === BULL (EMA50_4h > EMA200_4h AND ADX_4h > 20)
  * 3. ADX_1h > 25
  * 4. EMA20_1h > EMA50_1h
  * 5. Close price breaks above Donchian High (lookback = 20)
  * 
- * EXIT Rules (1h only):
- * - PositionState === OPEN
- * - EMA20_1h < EMA50_1h
+ * EXIT Rules (v3):
+ * - NO active exit signals from strategy
+ * - Only RiskManager handles exits via:
+ *   - Initial stop loss (1% fixed)
+ *   - Trailing stop (activated at +1R, based on EMA20_1H)
  * 
- * Note: 4h trend is NOT used for EXIT decisions
+ * v3 Philosophy:
+ * - Let profits run by removing premature exit signals
+ * - Trailing stop follows trend via EMA20_1H
+ * - Only stop loss can trigger exit (initial or trailing)
  */
 export function trendStrategy(
   context: {
@@ -113,33 +125,17 @@ export function trendStrategy(
     ema200 === undefined ||
     adx4h === undefined
   ) {
-    // If HTF indicators are missing, we can still check EXIT
-    // but cannot make ENTRY decisions
-    if (positionState === "OPEN") {
-      // EXIT check (doesn't require HTF)
-      if (ema20 < ema50) {
-        return {
-          type: "EXIT",
-          reason: "EMA_REVERSAL_1H" as TradeReason,
-        };
-      }
-    }
+    // If HTF indicators are missing, cannot make ENTRY decisions
+    // v3: No active exit signals from strategy
     return { type: "HOLD" };
   }
 
   /* =========================
-   * EXIT Rules (check first when position exists)
+   * EXIT Rules (v3: removed)
    * ========================= */
+  // v3: Strategy does NOT generate EXIT signals
+  // All exits are handled by RiskManager (stop loss / trailing stop)
   if (positionState === "OPEN") {
-    // EXIT: EMA20_1h < EMA50_1h
-    // Note: 4h trend is NOT used for EXIT
-    if (ema20 < ema50) {
-      return {
-        type: "EXIT",
-        reason: "EMA_REVERSAL_1H" as TradeReason,
-      };
-    }
-    // Otherwise hold
     return { type: "HOLD" };
   }
 

@@ -67,6 +67,14 @@ export class TradeLogger {
     const avgWin = wins.length > 0 ? totalWin / wins.length : 0;
     const avgLoss = losses.length > 0 ? totalLoss / losses.length : 0;
     const expectancy = totalTrades > 0 ? (totalWin + totalLoss) / totalTrades : 0;
+    
+    // Calculate max win (largest single winning trade)
+    const maxWin = wins.length > 0 ? Math.max(...wins.map(t => t.pnl)) : 0;
+    
+    // Calculate total return (percentage)
+    const totalReturn = this.initialCapital > 0 
+      ? ((this.currentEquity - this.initialCapital) / this.initialCapital) * 100 
+      : 0;
 
     // Calculate max drawdown
     let maxEquity = this.initialCapital;
@@ -91,6 +99,10 @@ export class TradeLogger {
         expectancy,
         maxDrawdown,
         profitFactor,
+        averageWin: avgWin,
+        averageLoss: avgLoss,
+        maxWin,
+        totalReturn,
       },
     };
   }

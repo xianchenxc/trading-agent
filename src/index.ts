@@ -46,12 +46,29 @@ async function runBacktest(config: Config) {
     console.log("Fetching historical data...");
     
     // For backtest, we need data from the past
-    // Use today 0:00:00 as endTime to match the closeTime of the last complete K-line
-    // For 1h K-lines, the last complete bar is 23:00-00:00, which closes at 00:00:00
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const endTime = today.getTime();
-    const startTime = endTime - 360 * 24 * 60 * 60 * 1000; // 360 days ago
+    // Parse configured date strings to timestamps
+    const startDate = new Date(config.backtest.startDate);
+    const endDate = new Date(config.backtest.endDate);
+    
+    // Validate dates
+    if (isNaN(startDate.getTime())) {
+      throw new Error(`Invalid startDate: ${config.backtest.startDate}`);
+    }
+    if (isNaN(endDate.getTime())) {
+      throw new Error(`Invalid endDate: ${config.backtest.endDate}`);
+    }
+    
+    // Normalize to 0:00:00
+    startDate.setHours(0, 0, 0, 0);
+    endDate.setHours(0, 0, 0, 0);
+    
+    const startTime = startDate.getTime();
+    const endTime = endDate.getTime();
+    
+    // Validate date range
+    if (startTime >= endTime) {
+      throw new Error(`startDate (${config.backtest.startDate}) must be before endDate (${config.backtest.endDate})`);
+    }
 
     // Fetch both HTF (4h) and LTF (1h) klines
     console.log(`Fetching ${config.timeframe.trend} klines (HTF)...`);
@@ -144,6 +161,7 @@ async function runBacktest(config: Config) {
     console.log(`Profit Factor: ${results.stats.profitFactor.toFixed(2)}`);
     console.log(`Average Win: $${avgWin.toFixed(2)}`);
     console.log(`Average Loss: $${avgLoss.toFixed(2)}`);
+    console.log(`Max Win: $${results.stats.maxWin.toFixed(2)}`);
     console.log("=".repeat(60));
     console.log();
 

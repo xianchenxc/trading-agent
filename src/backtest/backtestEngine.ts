@@ -1,5 +1,5 @@
 import { Config } from '../config';
-import { IndicatorData, Kline, StrategySignal, TradeReason, BacktestResult, HTFIndicatorData, LTFIndicatorData } from '../types';
+import { Kline, StrategySignal, TradeReason, BacktestResult, HTFIndicatorData, LTFIndicatorData } from '../types';
 import { trendStrategy } from '../strategy/trendStrategy';
 import { riskManager, calculatePositionSize } from '../risk/riskManager';
 import { PositionStore } from '../state/positionStore';
@@ -51,27 +51,37 @@ export class BacktestEngine {
     const positionState = this.positionStore.getState();
 
     /* =========================
-     * 1️⃣ Risk Management（优先检查止损）
+     * 1️⃣ Risk Management（优先检查止损 + Trailing Stop）
      * ========================= */
     if (position && positionState === "OPEN") {
-      // Convert LTFIndicatorData to IndicatorData for RiskManager compatibility
-      const indicatorForRisk: IndicatorData = {
-        atr: ltfIndicator.atr,
-      };
-
-      const riskDecision = riskManager(
+      // Use LTFIndicatorData directly for RiskManager (v3)
+      const riskResult = riskManager(
         position,
         {
           close: bar.close,
           high: bar.high,
           low: bar.low,
-          indicator: indicatorForRisk,
         },
+        ltfIndicator,
         this.config
       );
 
-      if (riskDecision.action === 'EXIT') {
-        this.executeExit(bar, riskDecision.reason || 'STOP_LOSS');
+      // Handle trailing stop updates
+      if (riskResult.trailingUpdate.shouldUpdate) {
+        this.positionStore.dispatch({
+          type: 'UPDATE_STOP',
+          payload: {
+            trailingStop: riskResult.trailingUpdate.trailingStop,
+            isTrailingActive: riskResult.trailingUpdate.isTrailingActive,
+            maxUnrealizedR: riskResult.trailingUpdate.maxUnrealizedR,
+          },
+          reason: 'TRAILING_STOP' as TradeReason,
+        });
+      }
+
+      // Check if stop loss is triggered
+      if (riskResult.decision.action === 'EXIT') {
+        this.executeExit(bar, riskResult.decision.reason || 'STOP_LOSS');
         return;
       }
     }
@@ -109,22 +119,19 @@ export class BacktestEngine {
     if (!signal.side || signal.side !== "LONG") {
       return; // MVP: only LONG
     }
-
-    const atr = ltfIndicator.atr;
-    if (!atr) {
-      return; // ATR required for position sizing
-    }
+    
 
     const entryPrice = bar.close;
     const equity = this.logger.getCurrentEquity();
     const riskPerTrade = this.config.risk.maxRiskPerTrade;
+    const stopLossPercent = this.config.strategy.stopLoss.fixedPercent;
 
-    // Calculate position size and stop loss using RiskManager
+    // Calculate position size and stop loss using RiskManager (v3: 1% fixed stop)
     const { size, stopLoss } = calculatePositionSize(
       entryPrice,
-      atr,
       equity,
-      riskPerTrade
+      riskPerTrade,
+      stopLossPercent
     );
 
     this.positionStore.dispatch({
@@ -143,7 +150,7 @@ export class BacktestEngine {
     const tradeAction = {
       action: 'ENTER' as const,
       side: signal.side,
-      atr,
+      atr: ltfIndicator.atr || 0, // ATR for logging only
       reason: (signal.reason as TradeReason) || 'HTF_BULL_TREND_CONFIRMED',
     };
     this.logger.logEntry(bar, tradeAction);

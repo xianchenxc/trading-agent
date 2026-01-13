@@ -66,25 +66,6 @@ export interface LTFIndicatorData {
   donchianHigh?: number;
 }
 
-/**
- * Multi-timeframe indicator context
- * Combines HTF and LTF indicators for strategy decision
- */
-export interface MultiTimeframeIndicatorData {
-  htf: HTFIndicatorData;
-  ltf: LTFIndicatorData;
-}
-
-/* =========================
- * Indicator builder output
- * ========================= */
-
-export interface IndicatorBar extends IndicatorData {
-  timestamp: number;
-  close: number;
-  high: number;
-  low: number;
-}
 
 /* =========================
  * Trading primitives
@@ -93,14 +74,13 @@ export interface IndicatorBar extends IndicatorData {
 export type PositionSide = "LONG" | "SHORT";
 
 export type TradeReason =
-  | 'TREND_CONFIRMED'
   | 'TREND_INVALIDATED'
-  | 'STOP_LOSS'
+  | 'STOP_LOSS_INITIAL'
   | 'TRAILING_STOP'
+  | 'TRAILING_STOP_HIT'
   | 'MANUAL_EXIT'
   | 'HTF_BULL_TREND_CONFIRMED'
-  | 'HTF_BULL_BREAKOUT_CONFIRMED'
-  | 'EMA_REVERSAL_1H';
+  | 'HTF_BULL_BREAKOUT_CONFIRMED';
 
 export interface TradeAction {
   action: 'ENTER';
@@ -123,12 +103,16 @@ export interface Position {
   side: PositionSide;
 
   entryPrice: number;
-  stopLoss: number;
-  trailingStop?: number;
+  stopLoss: number; // Initial stop loss (hard stop)
+  trailingStop?: number; // Trailing stop level (based on EMA20_1H)
 
   size: number;
 
   entryTime: number;
+
+  // Trailing stop state
+  isTrailingActive: boolean; // Whether trailing stop is activated
+  maxUnrealizedR: number; // Maximum unrealized profit in R units
 
   // optional: 用于分析
   reason?: TradeReason;
@@ -211,5 +195,9 @@ export interface BacktestResult {
     expectancy: number;
     maxDrawdown: number;
     profitFactor: number;
+    averageWin: number;
+    averageLoss: number;
+    maxWin: number;
+    totalReturn: number; // Percentage return
   };
 }

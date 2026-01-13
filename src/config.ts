@@ -6,7 +6,6 @@
 export interface Config {
   // Exchange settings
   exchange: {
-    name: string;
     baseUrl: string;
     symbol: string; // e.g., "BTCUSDT"
   };
@@ -36,27 +35,18 @@ export interface Config {
   strategy: {
     lookbackPeriod: number; // N bars for breakout / structure
 
-    trend: {
-      minAdx: number;              // e.g. 20
-      minEmaDistanceRatio: number; // e.g. 0.005 (0.5%)
-    };
-
     stopLoss: {
-      atrMultiplier: number; // e.g. 1.5 × ATR
+      fixedPercent: number; // e.g. 0.01 (1% fixed stop loss)
     };
 
     trailingStop: {
-      activationR: number; // e.g. 1.5R
-      atrMultiplier: number; // e.g. 2.5 × ATR
+      activationR: number; // e.g. 1.0 (activate at +1R)
     };
   };
 
   // Risk management
   risk: {
     maxRiskPerTrade: number;      // e.g. 0.01 (1%)
-    maxPositionCount: number;     // e.g. 1
-    maxConsecutiveLosses: number; // e.g. 3
-    cooldownHours: number;        // e.g. 24
   };
 
   // Backtest settings
@@ -64,6 +54,8 @@ export interface Config {
     initialCapital: number;
     commissionRate: number; // e.g. 0.001 (0.1%)
     slippageRate: number;   // e.g. 0.0005 (0.05%)
+    startDate: string;      // Start date for backtest (ISO date string, e.g. "2024-01-01")
+    endDate: string;        // End date for backtest (ISO date string, e.g. "2024-12-31")
   };
 
   // Data cache settings
@@ -75,7 +67,6 @@ export interface Config {
 
 export const defaultConfig: Config = {
   exchange: {
-    name: "Binance",
     baseUrl: "https://api.binance.com",
     symbol: "BTCUSDT",
   },
@@ -103,32 +94,25 @@ export const defaultConfig: Config = {
   strategy: {
     lookbackPeriod: 20,
 
-    trend: {
-      minAdx: 20,                  // 趋势启动阈值
-      minEmaDistanceRatio: 0.005,  // 0.5% EMA 拉开距离
-    },
-
     stopLoss: {
-      atrMultiplier: 1.5,
+      fixedPercent: 0.01, // 1% fixed stop loss
     },
 
     trailingStop: {
-      activationR: 1.5,
-      atrMultiplier: 2.5,
+      activationR: 1.0, // Activate trailing stop at +1R
     },
   },
 
   risk: {
     maxRiskPerTrade: 0.01, // 1%
-    maxPositionCount: 1,
-    maxConsecutiveLosses: 3,
-    cooldownHours: 24,
   },
 
   backtest: {
     initialCapital: 10_000,
     commissionRate: 0.001, // 0.1%
     slippageRate: 0.0005,  // 0.05%
+    startDate: "2025-01-01", // Start date (ISO date string)
+    endDate: "2026-01-01",   // End date (ISO date string)
   },
 
   cache: {
