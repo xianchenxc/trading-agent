@@ -59,6 +59,10 @@ export interface LTFIndicatorData {
   // 1h ADX
   adx?: number;
   
+  // v5: ADX historical series for trend exhaustion detection
+  // Contains recent ADX values (excluding current bar to avoid lookahead bias)
+  adx_1h_series?: number[];
+  
   // ATR (used by RiskManager only)
   atr?: number;
   
@@ -106,7 +110,7 @@ export interface Position {
   entryPrice: number;
   initialStopLoss: number; // Initial stop loss (hard stop, never changes)
   stopLoss: number; // Current active stop loss (stage 1: initialStopLoss, stage 2: entryPrice, stage 3: trailingStop)
-  trailingStop?: number; // Trailing stop level (only used in stage 3, based on EMA20_1H)
+  trailingStop?: number; // Trailing stop level (only used in stage 3, based on EMA20_1H or EMA50_1H)
 
   size: number;
 
@@ -115,6 +119,7 @@ export interface Position {
   // Trailing stop state
   isTrailingActive: boolean; // Whether trailing stop is activated (stage 3 only)
   maxUnrealizedR: number; // Maximum unrealized profit in R units
+  trailingMode?: "EMA20" | "EMA50"; // v5: Trailing stop mode (EMA20 default, EMA50 for profit lock)
 
   // optional: 用于分析
   reason?: TradeReason;

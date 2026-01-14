@@ -260,13 +260,28 @@ export function buildLTFIndicators(
     getDonchianHigh(klines, donchianLookback, i)
   );
 
-  return klines.map((k, i) => ({
-    ema20: ema20[i],
-    ema50: ema50[i],
-    adx: adx[i],
-    atr: atr[i],
-    donchianHigh: donchianHighs[i],
-  }));
+  return klines.map((k, i) => {
+    // v5: Build ADX historical series (excluding current bar to avoid lookahead bias)
+    // For each bar, include ADX values from previous bars only
+    const adxSeries: number[] = [];
+    if (i > 0) {
+      // Include ADX values from previous bars (excluding current bar)
+      for (let j = Math.max(0, i - 10); j < i; j++) {
+        if (adx[j] !== undefined) {
+          adxSeries.push(adx[j]!);
+        }
+      }
+    }
+
+    return {
+      ema20: ema20[i],
+      ema50: ema50[i],
+      adx: adx[i],
+      adx_1h_series: adxSeries.length > 0 ? adxSeries : undefined,
+      atr: atr[i],
+      donchianHigh: donchianHighs[i],
+    };
+  });
 }
 
 /**

@@ -66,7 +66,7 @@ export class BacktestEngine {
         this.config
       );
 
-      // Handle trailing stop updates (v4: includes break-even stopLoss updates)
+      // Handle trailing stop updates (v5: includes break-even stopLoss updates + profit lock)
       if (riskResult.trailingUpdate.shouldUpdate) {
         this.positionStore.dispatch({
           type: 'UPDATE_STOP',
@@ -75,6 +75,7 @@ export class BacktestEngine {
             trailingStop: riskResult.trailingUpdate.trailingStop,
             isTrailingActive: riskResult.trailingUpdate.isTrailingActive,
             maxUnrealizedR: riskResult.trailingUpdate.maxUnrealizedR,
+            trailingMode: riskResult.trailingUpdate.trailingMode, // v5: Trailing stop mode
           },
           reason: 'TRAILING_STOP' as TradeReason,
         });

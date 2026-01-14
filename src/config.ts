@@ -42,6 +42,10 @@ export interface Config {
     initialStopPct: number;       // e.g. 0.01 (1%)
     breakEvenR: number;           // e.g. 1.0 (move to break-even at +1R)
     trailingActivationR: number;   // e.g. 2.0 (activate trailing stop at +2R)
+    // v5: Trend exhaustion filter
+    trendExhaustADX?: number;     // e.g. 20 (ADX threshold for trend exhaustion)
+    trendExhaustBars?: number;    // e.g. 3 (number of consecutive declining bars)
+    profitLockR?: number;         // e.g. 4.0 (switch to EMA50 trailing at +4R, optional)
   };
 
   // Backtest settings
@@ -63,7 +67,7 @@ export interface Config {
 export const defaultConfig: Config = {
   exchange: {
     baseUrl: "https://api.binance.com",
-    symbol: "ETHUSDT",
+    symbol: "BTCUSDT",
   },
 
   timeframe: {
@@ -95,6 +99,10 @@ export const defaultConfig: Config = {
     initialStopPct: 0.01, // 1% initial stop loss
     breakEvenR: 1.0, // Move to break-even at +1R
     trailingActivationR: 2.0, // Activate trailing stop at +2R (v4: Delayed Trailing Stop)
+    // v5: Trend exhaustion filter
+    trendExhaustADX: 20, // ADX threshold for trend exhaustion
+    trendExhaustBars: 3, // Number of consecutive declining ADX bars
+    profitLockR: 4.0, // Switch to EMA50 trailing at +4R (optional, can be undefined to disable)
   },
 
   backtest: {
