@@ -1,13 +1,18 @@
-import { Kline, Position, TradeAction, TradeReason, BacktestResult, TradeRecord } from '../types';
+import { Kline, Position, TradeAction, TradeReason, BacktestResult, TradeRecord } from '../../types';
 
 export class TradeLogger {
   private trades: TradeRecord[] = [];
   private initialCapital: number = 0;
   private currentEquity: number = 0;
+  private silent: boolean = false;
 
   setInitialCapital(capital: number) {
     this.initialCapital = capital;
     this.currentEquity = capital;
+  }
+
+  setSilent(silent: boolean) {
+    this.silent = silent;
   }
 
   getCurrentEquity(): number {
@@ -15,43 +20,64 @@ export class TradeLogger {
   }
 
   logEntry(bar: Kline, action: TradeAction) {
-    console.log(
-      `[ENTRY] ${action.side} @ ${bar.close} | reason=${action.reason}`
-    );
+    if (!this.silent) {
+      console.log(
+        `[ENTRY] ${action.side} @ ${bar.close} | reason=${action.reason}`
+      );
+    }
   }
 
-  logExit(bar: Kline, position: Position, reason: TradeReason) {
+  logExit(
+    bar: Kline, 
+    position: Position, 
+    reason: TradeReason,
+    options?: {
+      commission?: number;
+      slippage?: number;
+      exitPrice?: number; // Actual exit price (with slippage)
+    }
+  ) {
     const entryValue = position.entryPrice * position.size;
-    const exitValue = bar.close * position.size;
+    const actualExitPrice = options?.exitPrice || bar.close;
+    const exitValue = actualExitPrice * position.size;
+    
+    // Calculate PnL
     const pnl =
       position.side === 'LONG'
         ? exitValue - entryValue
         : entryValue - exitValue;
+    
+    // Apply commission and slippage if provided
+    const commission = options?.commission || 0;
+    const slippage = options?.slippage || 0;
+    const finalPnL = pnl - commission - slippage;
 
     // Update equity
-    this.currentEquity += pnl;
+    this.currentEquity += finalPnL;
 
     const trade: TradeRecord = {
       side: position.side,
       entryPrice: position.entryPrice,
       entryTime: position.entryTime,
-      exitPrice: bar.close,
+      exitPrice: actualExitPrice,
       exitTime: bar.closeTime,
       size: position.size,
-      pnl,
-      commission: 0, // TODO: Calculate commission
-      slippage: 0, // TODO: Calculate slippage
+      pnl: finalPnL,
+      commission,
+      slippage,
       equityAfterTrade: this.currentEquity,
       reason: reason,
     };
 
     this.trades.push(trade);
 
-    console.log(
-      `[EXIT] ${position.side} @ ${bar.close} | PnL=${pnl.toFixed(
-        2
-      )} | reason=${reason}`
-    );
+    if (!this.silent) {
+      console.log(
+        `[EXIT] ${position.side} @ ${actualExitPrice.toFixed(2)} | PnL=${finalPnL.toFixed(
+          2
+        )} | reason=${reason}`
+      );
+    }
   }
 
   getResults(): BacktestResult {

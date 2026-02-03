@@ -1,4 +1,4 @@
-import { Position, TradeReason, PositionSide, PositionState } from '../types';
+import { Position, TradeReason, PositionSide, PositionState } from '../../types';
 
 type PositionAction =
   | {

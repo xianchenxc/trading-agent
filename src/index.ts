@@ -1,191 +1,208 @@
 /**
  * Main entry point for Trading Agent
- * Supports both backtest and live trading modes
+ * Supports multi-instance backtest and paper trading modes
  */
 
+import { BacktestEngine } from "./engine/backtestEngine";
+import { PaperEngine } from "./engine/paperEngine";
+import { InstanceOrchestrator } from "./instance/instanceOrchestrator";
+import { StrategyInstance } from "./instance/strategyInstance";
+import { instanceConfigs } from "./config/instanceConfig";
+import { prepareBacktestData, preparePaperTradingData } from "./services/dataService";
+import { alignHTFIndicatorsToLTF, findHTFIndicatorForLTFBar } from "./services/timeAlignmentService";
+import { validateBacktest } from "./services/backtestValidationService";
+import { generateDetailedReport, formatReportAsText, exportReportToJSON, exportReportToCSV } from "./services/backtestReportService";
 import { DataFetcher } from "./data/fetcher";
-import { BacktestEngine } from "./backtest/backtestEngine";
-import { defaultConfig, Config } from "./config";
-import { HTFIndicatorData } from "./types";
+import { Kline, HTFIndicatorData } from "./types";
+import { logInfo, logWarn, logError, LogLevel, logger } from "./utils/logger";
 
 async function main() {
   const args = process.argv.slice(2);
-  const mode = args.includes("--mode=backtest") ? "backtest" : "backtest"; // Default to backtest for MVP
-
-  const config = defaultConfig;
+  let mode = "backtest"; // Default to backtest
+  
+  if (args.includes("--mode=backtest")) {
+    mode = "backtest";
+  } else if (args.includes("--mode=paper")) {
+    mode = "paper";
+  }
 
   if (mode === "backtest") {
-    await runBacktest(config);
+    await runBacktest();
+  } else if (mode === "paper") {
+    await runPaperTrading();
   } else {
-    console.log("Live trading mode not implemented yet");
+    console.log("Unknown mode. Use --mode=backtest or --mode=paper");
     process.exit(1);
   }
 }
 
-async function runBacktest(config: Config) {
+async function runBacktest() {
   console.log("=".repeat(60));
-  console.log("Trading Agent - Backtest Mode");
+  console.log("Trading Agent - Multi-Instance Backtest Mode");
   console.log("=".repeat(60));
-  console.log(`Symbol: ${config.exchange.symbol}`);
-  console.log(`Initial Capital: $${config.backtest.initialCapital}`);
-  console.log(`Commission: ${(config.backtest.commissionRate * 100).toFixed(2)}%`);
-  console.log(`Slippage: ${(config.backtest.slippageRate * 100).toFixed(2)}%`);
-  console.log(`Cache: ${config.cache.enabled ? "Enabled" : "Disabled"}`);
+  console.log(`Instances: ${Object.keys(instanceConfigs).length}`);
   console.log("=".repeat(60));
   console.log();
 
-  const fetcher = new DataFetcher(
-    config.exchange.baseUrl,
-    config.cache.enabled,
-    config.cache.directory
-  );
-  const engine = new BacktestEngine(config);
+  // Create engine and orchestrator
+  const engine = new BacktestEngine();
+  const orchestrator = new InstanceOrchestrator(engine);
+
+  // Create instances from config
+  const instances: StrategyInstance[] = [];
+  for (const instanceConfig of Object.values(instanceConfigs)) {
+    const instance = new StrategyInstance(instanceConfig);
+    instances.push(instance);
+    orchestrator.registerInstance(instance);
+    console.log(`Registered instance: ${instance.instanceId} (${instance.symbol})`);
+  }
+  console.log();
 
   try {
-    // Fetch historical data
-    console.log("Fetching historical data...");
+    // Prepare data for each instance
+    const instanceData = new Map<string, {
+      ltfKlines: Kline[];
+      htfIndicators: HTFIndicatorData[];
+      ltfIndicators: any[];
+    }>();
+    const instanceRawData = new Map<string, {
+      ltfKlines: Kline[];
+      htfKlines: Kline[];
+      htfIndicators: HTFIndicatorData[];
+      ltfIndicators: any[];
+    }>();
+
+    // Fetch data and calculate indicators for each instance (parallel)
+    console.log(`Fetching data for ${instances.length} instances in parallel...`);
+    const dataPromises = instances.map(async (instance) => {
+      console.log(`[${instance.instanceId}] Fetching data...`);
+      
+      // Use data service to prepare backtest data
+      const data = await prepareBacktestData(instance);
+      
+      console.log(`[${instance.instanceId}] Fetched ${data.htfKlines.length} ${instance.config.timeframe.trend} klines`);
+      console.log(`[${instance.instanceId}] Fetched ${data.ltfKlines.length} ${instance.config.timeframe.signal} klines`);
+
+      // Align HTF indicators to LTF bars using time alignment service
+      const mappedHTFIndicators = alignHTFIndicatorsToLTF(data.ltfKlines, data.htfKlines, data.htfIndicators);
+
+      return {
+        instanceId: instance.instanceId,
+        instance,
+        data: {
+          ltfKlines: data.ltfKlines,
+          htfIndicators: mappedHTFIndicators,
+          ltfIndicators: data.ltfIndicators,
+        },
+        rawData: {
+          ltfKlines: data.ltfKlines,
+          htfKlines: data.htfKlines,
+          htfIndicators: data.htfIndicators,
+          ltfIndicators: data.ltfIndicators,
+        },
+      };
+    });
+
+    // Wait for all data to be fetched in parallel
+    const dataResults = await Promise.all(dataPromises);
     
-    // For backtest, we need data from the past
-    // Parse configured date strings to timestamps
-    const startDate = new Date(config.backtest.startDate);
-    const endDate = new Date(config.backtest.endDate);
-    
-    // Validate dates
-    if (isNaN(startDate.getTime())) {
-      throw new Error(`Invalid startDate: ${config.backtest.startDate}`);
-    }
-    if (isNaN(endDate.getTime())) {
-      throw new Error(`Invalid endDate: ${config.backtest.endDate}`);
-    }
-    
-    // Normalize to 0:00:00
-    startDate.setHours(0, 0, 0, 0);
-    endDate.setHours(0, 0, 0, 0);
-    
-    const startTime = startDate.getTime();
-    const endTime = endDate.getTime();
-    
-    // Validate date range
-    if (startTime >= endTime) {
-      throw new Error(`startDate (${config.backtest.startDate}) must be before endDate (${config.backtest.endDate})`);
+    // Populate maps
+    for (const result of dataResults) {
+      instanceData.set(result.instanceId, result.data);
+      instanceRawData.set(result.instanceId, result.rawData);
     }
 
-    // Fetch both HTF (4h) and LTF (1h) klines
-    console.log(`Fetching ${config.timeframe.trend} klines (HTF)...`);
-    const htfKlines = await fetcher.fetchKlinesForBacktest(
-      config.exchange.symbol,
-      config.timeframe.trend,
-      startTime,
-      endTime
-    );
-    console.log(`Fetched ${htfKlines.length} ${config.timeframe.trend} klines`);
-
-    console.log(`Fetching ${config.timeframe.signal} klines (LTF)...`);
-    const ltfKlines = await fetcher.fetchKlinesForBacktest(
-      config.exchange.symbol,
-      config.timeframe.signal,
-      startTime,
-      endTime
-    );
-    console.log(`Fetched ${ltfKlines.length} ${config.timeframe.signal} klines`);
+    // Validate backtest data before running
     console.log();
+    console.log("Validating backtest data...");
+    let hasValidationErrors = false;
+    for (const instance of instances) {
+      const rawData = instanceRawData.get(instance.instanceId);
+      const data = instanceData.get(instance.instanceId);
+      if (!rawData || !data) continue;
 
-    if (htfKlines.length === 0 || ltfKlines.length === 0) {
-      console.error("Error: No historical data fetched");
+      const validation = validateBacktest(
+        instance.instanceId,
+        data.ltfKlines,
+        rawData.htfKlines,
+        rawData.htfIndicators,
+        data.htfIndicators,
+        data.ltfIndicators
+      );
+
+      if (!validation.isValid) {
+        hasValidationErrors = true;
+        logError(`Validation FAILED`, { errors: validation.errors }, instance.instanceId);
+      }
+
+      if (validation.warnings.length > 0) {
+        logWarn(`Validation warnings`, { warnings: validation.warnings }, instance.instanceId);
+      }
+
+      if (validation.isValid && validation.warnings.length === 0) {
+        logInfo(`Validation passed`, undefined, instance.instanceId);
+      }
+    }
+
+    if (hasValidationErrors) {
+      logError("Backtest validation failed. Please fix data quality issues before running backtest.");
       process.exit(1);
     }
 
-    // Calculate indicators for both timeframes
-    const { buildHTFIndicators, buildLTFIndicators } = await import("./indicators/indicators");
-    console.log("Calculating indicators...");
-    const htfIndicators = buildHTFIndicators(htfKlines, config.indicators);
-    const ltfIndicators = buildLTFIndicators(ltfKlines, config.indicators, config.strategy.lookbackPeriod);
+    console.log();
+    console.log("Running backtest for all instances...");
+    console.log();
 
-    // Map HTF indicators to LTF bars (time alignment)
-    // For each 1h bar, find the corresponding 4h bar that has closed
-    // A 4h bar is considered "closed" if its closeTime < 1h bar's openTime
-    // This ensures we only use fully closed 4h bars (no lookahead bias)
-    const mappedHTFIndicators: HTFIndicatorData[] = [];
-    
-    for (const ltfBar of ltfKlines) {
-      // Find the most recent 4h bar that has closed before this 1h bar starts
-      // Use strict < to avoid using the current 4h bar that might still be forming
-      let matchedHTFIndicator: HTFIndicatorData | null = null;
+    // Run backtest for all instances
+    await orchestrator.runBacktest(instanceData);
+
+    // Display results for each instance
+    console.log();
+    console.log("=".repeat(60));
+    console.log("Backtest Results Summary");
+    console.log("=".repeat(60));
+    console.log();
+
+    const allResults = orchestrator.getAllResults();
+    for (const [instanceId, results] of allResults) {
+      const instance = instances.find(i => i.instanceId === instanceId);
+      const config = instance?.config;
+      if (!config) continue;
+
+      const totalReturnPercent = ((results.finalEquity - config.backtest.initialCapital) / config.backtest.initialCapital) * 100;
+      const winningTrades = results.trades.filter(t => t.pnl > 0).length;
+      const losingTrades = results.trades.filter(t => t.pnl < 0).length;
+      const avgWin = winningTrades > 0 ? results.trades.filter(t => t.pnl > 0).reduce((sum, t) => sum + t.pnl, 0) / winningTrades : 0;
+      const avgLoss = losingTrades > 0 ? Math.abs(results.trades.filter(t => t.pnl < 0).reduce((sum, t) => sum + t.pnl, 0) / losingTrades) : 0;
+      const maxDrawdownPercent = (results.stats.maxDrawdown / config.backtest.initialCapital) * 100;
+
+      console.log(`[${instanceId}]`);
+      console.log(`  Symbol: ${instance?.symbol}`);
+      console.log(`  Total Return: $${(results.finalEquity - config.backtest.initialCapital).toFixed(2)} (${totalReturnPercent.toFixed(2)}%)`);
+      console.log(`  Final Equity: $${results.finalEquity.toFixed(2)}`);
+      console.log(`  Max Drawdown: $${results.stats.maxDrawdown.toFixed(2)} (${maxDrawdownPercent.toFixed(2)}%)`);
+      console.log(`  Total Trades: ${results.stats.totalTrades}`);
+      console.log(`  Win Rate: ${results.stats.winRate.toFixed(2)}%`);
+      console.log(`  Profit Factor: ${results.stats.profitFactor.toFixed(2)}`);
+      console.log(`  Average Win: $${avgWin.toFixed(2)}`);
+      console.log(`  Average Loss: $${avgLoss.toFixed(2)}`);
+      console.log();
+
+      // Generate detailed report
+      const detailedReport = generateDetailedReport(instanceId, results);
       
-      for (let i = htfKlines.length - 1; i >= 0; i--) {
-        const htfBar = htfKlines[i];
-        // 4h bar is closed if its closeTime < 1h bar's openTime
-        // This ensures we only use fully closed 4h bars
-        if (htfBar.closeTime < ltfBar.openTime) {
-          matchedHTFIndicator = htfIndicators[i];
-          break;
-        }
-      }
+      // Display detailed report
+      console.log(formatReportAsText(detailedReport));
       
-      // If no matching 4h bar found, use undefined (will result in HOLD signal)
-      mappedHTFIndicators.push(matchedHTFIndicator || {
-        ema50: undefined,
-        ema200: undefined,
-        adx: undefined,
-      });
+      // Export reports to files
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const reportsDir = `reports/${instanceId}`;
+      exportReportToJSON(detailedReport, `${reportsDir}/${timestamp}.json`);
+      exportReportToCSV(detailedReport, `${reportsDir}/${timestamp}.csv`);
+      logInfo(`Detailed reports exported to ${reportsDir}/`, undefined, instanceId);
     }
 
-    // Run backtest with multi-timeframe data
-    console.log("Running backtest...");
-    console.log();
-    const results = engine.run(
-      ltfKlines,
-      mappedHTFIndicators,
-      ltfIndicators
-    );
-
-    // Display results
-    console.log();
     console.log("=".repeat(60));
-    console.log("Backtest Results");
-    console.log("=".repeat(60));
-    const totalReturn = results.finalEquity - results.stats.totalTrades * 0; // Simplified
-    const totalReturnPercent = ((results.finalEquity - config.backtest.initialCapital) / config.backtest.initialCapital) * 100;
-    const winningTrades = results.trades.filter(t => t.pnl > 0).length;
-    const losingTrades = results.trades.filter(t => t.pnl < 0).length;
-    const avgWin = winningTrades > 0 ? results.trades.filter(t => t.pnl > 0).reduce((sum, t) => sum + t.pnl, 0) / winningTrades : 0;
-    const avgLoss = losingTrades > 0 ? Math.abs(results.trades.filter(t => t.pnl < 0).reduce((sum, t) => sum + t.pnl, 0) / losingTrades) : 0;
-
-    console.log(`Total Return: $${totalReturn.toFixed(2)} (${totalReturnPercent.toFixed(2)}%)`);
-    const maxDrawdownPercent = (results.stats.maxDrawdown / config.backtest.initialCapital) * 100;
-    console.log(`Max Drawdown: $${results.stats.maxDrawdown.toFixed(2)} (${maxDrawdownPercent.toFixed(2)}%)`);
-    console.log(`Total Trades: ${results.stats.totalTrades}`);
-    console.log(`Winning Trades: ${winningTrades}`);
-    console.log(`Losing Trades: ${losingTrades}`);
-    console.log(`Win Rate: ${results.stats.winRate.toFixed(2)}%`);
-    console.log(`Profit Factor: ${results.stats.profitFactor.toFixed(2)}`);
-    console.log(`Average Win: $${avgWin.toFixed(2)}`);
-    console.log(`Average Loss: $${avgLoss.toFixed(2)}`);
-    console.log(`Max Win: $${results.stats.maxWin.toFixed(2)}`);
-    console.log("=".repeat(60));
-    console.log();
-
-    // Display recent trades
-    if (results.trades.length > 0) {
-      console.log("Recent Trades (last 10):");
-      console.log("-".repeat(60));
-      const recentTrades = results.trades.slice(-10).reverse();
-      for (const trade of recentTrades) {
-        const pnlSign = trade.pnl >= 0 ? "+" : "";
-        const pnlPercent = ((trade.exitPrice - trade.entryPrice) / trade.entryPrice) * 100 * (trade.side === 'LONG' ? 1 : -1);
-        console.log(
-          `${trade.side.padEnd(5)} | ` +
-          `Entry: $${trade.entryPrice.toFixed(2)} | ` +
-          `Exit: $${trade.exitPrice.toFixed(2)} | ` +
-          `PnL: ${pnlSign}$${trade.pnl.toFixed(2)} (${pnlSign}${pnlPercent.toFixed(2)}%) | ` +
-          `Reason: ${trade.reason}`
-        );
-      }
-      console.log("-".repeat(60));
-    }
-
-    // Print summary
-    results.stats && console.log();
     
   } catch (error: any) {
     console.error("Backtest failed:", error.message);
@@ -193,6 +210,173 @@ async function runBacktest(config: Config) {
     process.exit(1);
   }
 }
+
+/**
+ * Run paper trading mode - simulated live trading with real-time data
+ */
+async function runPaperTrading() {
+  console.log("=".repeat(60));
+  console.log("Trading Agent - Paper Trading Mode");
+  console.log("=".repeat(60));
+  console.log(`Instances: ${Object.keys(instanceConfigs).length}`);
+  console.log("=".repeat(60));
+  console.log();
+
+  // Create engine and orchestrator
+  const engine = new PaperEngine();
+  const orchestrator = new InstanceOrchestrator(engine);
+
+  // Create instances from config
+  const instances: StrategyInstance[] = [];
+  for (const instanceConfig of Object.values(instanceConfigs)) {
+    const instance = new StrategyInstance(instanceConfig);
+    instances.push(instance);
+    orchestrator.registerInstance(instance);
+    console.log(`Registered instance: ${instance.instanceId} (${instance.symbol})`);
+  }
+  console.log();
+
+  try {
+    // Initialize historical data for each instance (needed for indicator calculation)
+    const instanceState = new Map<string, {
+      fetcher: DataFetcher;
+      htfKlines: Kline[];
+      ltfKlines: Kline[];
+      lastLtfBarTime: number;
+      lastHtfBarTime: number;
+    }>();
+
+    // Fetch initial historical data for each instance using data service
+    for (const instance of instances) {
+      console.log(`[${instance.instanceId}] Initializing historical data...`);
+
+      const config = instance.config;
+      const fetcher = new DataFetcher(
+        config.exchange.baseUrl,
+        config.cache.enabled,
+        config.cache.directory
+      );
+
+      // Use data service to prepare paper trading data
+      const { htfKlines, ltfKlines } = await preparePaperTradingData(instance);
+      
+      console.log(`[${instance.instanceId}] Fetched ${htfKlines.length} ${config.timeframe.trend} klines`);
+      console.log(`[${instance.instanceId}] Fetched ${ltfKlines.length} ${config.timeframe.signal} klines`);
+
+      // Get the last bar times
+      const lastLtfBar = ltfKlines[ltfKlines.length - 1];
+      const lastHtfBar = htfKlines[htfKlines.length - 1];
+
+      instanceState.set(instance.instanceId, {
+        fetcher,
+        htfKlines,
+        ltfKlines,
+        lastLtfBarTime: lastLtfBar.openTime,
+        lastHtfBarTime: lastHtfBar.openTime,
+      });
+    }
+
+    console.log();
+    console.log("Paper trading started. Monitoring for new bars...");
+    console.log("Press Ctrl+C to stop.");
+    console.log();
+
+    // Main loop: check for new bars periodically
+    const checkIntervalMs = 60000; // Check every minute
+    let iteration = 0;
+
+    while (true) {
+      iteration++;
+      
+      // Check each instance for new bars
+      for (const instance of instances) {
+        const state = instanceState.get(instance.instanceId);
+        if (!state) continue;
+
+        const config = instance.config;
+        
+        try {
+          // Fetch latest LTF klines (only need last few bars)
+          const latestLtfKlines = await state.fetcher.fetchKlines(
+            config.exchange.symbol,
+            config.timeframe.signal,
+            5 // Only need last 5 bars to check for new one
+          );
+
+          if (latestLtfKlines.length === 0) continue;
+
+          const latestLtfBar = latestLtfKlines[latestLtfKlines.length - 1];
+
+          // Check if we have a new LTF bar
+          if (latestLtfBar.openTime > state.lastLtfBarTime) {
+            console.log(`[${instance.instanceId}] New ${config.timeframe.signal} bar detected at ${new Date(latestLtfBar.openTime).toISOString()}`);
+
+            // Update LTF klines
+            state.ltfKlines.push(latestLtfBar);
+            // Keep only last 200 bars
+            if (state.ltfKlines.length > 200) {
+              state.ltfKlines.shift();
+            }
+            state.lastLtfBarTime = latestLtfBar.openTime;
+
+            // Fetch latest HTF klines
+            const latestHtfKlines = await state.fetcher.fetchKlines(
+              config.exchange.symbol,
+              config.timeframe.trend,
+              5
+            );
+
+            if (latestHtfKlines.length > 0) {
+              const latestHtfBar = latestHtfKlines[latestHtfKlines.length - 1];
+              
+              // Update HTF klines if new bar exists
+              if (latestHtfBar.openTime > state.lastHtfBarTime) {
+                state.htfKlines.push(latestHtfBar);
+                if (state.htfKlines.length > 200) {
+                  state.htfKlines.shift();
+                }
+                state.lastHtfBarTime = latestHtfBar.openTime;
+              }
+            }
+
+            // Calculate indicators
+            const { buildHTFIndicators, buildLTFIndicators } = await import("./indicators/indicators");
+            const htfIndicators = buildHTFIndicators(state.htfKlines, config.indicators);
+            const ltfIndicators = buildLTFIndicators(state.ltfKlines, config.indicators, config.strategy.lookbackPeriod);
+
+            // Map HTF indicator to current LTF bar using time alignment service
+            const htfIndicator = findHTFIndicatorForLTFBar(
+              latestLtfBar,
+              state.htfKlines,
+              htfIndicators
+            );
+
+            const ltfIndicator = ltfIndicators[ltfIndicators.length - 1];
+
+            // Execute strategy for this instance
+            await orchestrator.executeInstance(
+              instance.instanceId,
+              latestLtfBar,
+              htfIndicator,
+              ltfIndicator
+            );
+          }
+        } catch (error: any) {
+          console.error(`[${instance.instanceId}] Error checking for new bars:`, error.message);
+          // Continue with other instances
+        }
+      }
+
+      // Wait before next check
+      await new Promise(resolve => setTimeout(resolve, checkIntervalMs));
+    }
+  } catch (error: any) {
+    console.error("Paper trading failed:", error.message);
+    console.error(error.stack);
+    process.exit(1);
+  }
+}
+
 
 // Run main function
 main().catch((error) => {

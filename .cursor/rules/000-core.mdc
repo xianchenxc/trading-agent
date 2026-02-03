@@ -1,0 +1,195 @@
+---
+description: Core principles and coding standards for TypeScript trading agent platform
+alwaysApply: true
+---
+
+# 核心原则与规范
+
+## 技术栈
+
+- **语言**: TypeScript (严格模式)
+- **运行时**: Node.js
+- **主要依赖**: 
+  - `axios`: HTTP 请求（数据获取）
+  - `jest`: 单元测试
+- **无框架**: 不使用 Express、NestJS 等框架，保持轻量级
+
+## 代码风格
+
+### TypeScript 规范
+
+- 使用严格类型检查（`strict: true`）
+- 优先使用 `interface` 而非 `type`（除非需要联合类型或工具类型）
+- 导出函数/类时使用命名导出，避免默认导出
+- 类型定义优先放在使用它的文件附近，而非全部集中在 `types.ts`
+- 使用 `readonly` 标记不可变属性
+
+### 函数式优先
+
+- **Core Layer 的 Strategy 和 RiskManager 必须是纯函数**
+  - 无副作用
+  - 不依赖外部状态
+  - 输入确定，输出确定
+  - 可测试、可复现
+
+### 命名规范
+
+- **文件命名**: camelCase（如 `strategyInstance.ts`）
+- **类命名**: PascalCase（如 `StrategyInstance`）
+- **函数命名**: camelCase（如 `trendStrategy`）
+- **常量命名**: camelCase（如 `defaultConfig`）
+- **接口命名**: PascalCase，以 `I` 开头表示接口（如 `IEngine`）
+- **类型别名**: PascalCase（如 `PositionState`）
+
+## 架构原则
+
+### 1. 三层架构（严格分层）
+
+```
+Instance Layer (实例层)
+    ↓ 使用
+Core Layer (核心业务逻辑层)
+    ↓ 使用
+Engine Layer (执行引擎层)
+```
+
+- **禁止跨层调用**: Instance 不能直接调用 Engine，必须通过 Core
+- **禁止反向依赖**: Core 不能依赖 Instance 或 Engine
+- **Engine 依赖 Core**: Engine 可以调用 Core 的工具函数（如 `calculatePositionSize`）
+
+详细说明见 `100-architecture.mdc`
+
+### 2. 实例隔离（Instance Isolation）
+
+- 每个 `StrategyInstance` 拥有完全独立的状态（PositionStore、TradeLogger）
+- 实例之间**禁止共享状态**
+- 实例之间**禁止直接通信**
+
+详细说明见 `100-architecture.mdc`
+
+### 3. 配置驱动（Configuration-Driven）
+
+- 新增策略实例 = 在 `instanceConfig.ts` 中添加配置
+- **禁止**在业务代码中硬编码实例逻辑
+- 配置是数据的唯一来源，代码只读取配置
+
+详细说明见 `100-architecture.mdc`
+
+### 4. 执行顺序保证
+
+在 `StrategyInstanceRunner.onBar()` 中，执行顺序**必须**是：
+1. **RiskManager** → 检查止损、更新 trailing stop
+2. **Strategy** → 生成交易信号
+3. **Engine** → 执行入场/出场
+
+这个顺序**不能改变**，因为风控必须优先于策略决策。
+
+详细说明见 `100-architecture.mdc`
+
+## 禁止事项
+
+### ❌ 禁止在 Core Layer 中引入状态
+
+```typescript
+// ❌ 错误：Core Layer 的函数不能有状态
+let globalCounter = 0;
+export function trendStrategy(...) {
+  globalCounter++; // 禁止！
+}
+
+// ✅ 正确：纯函数
+export function trendStrategy(...): StrategySignal {
+  // 只依赖输入参数
+}
+```
+
+### ❌ 禁止在 StrategyInstanceRunner 中修改策略逻辑
+
+```typescript
+// ❌ 错误：Runner 不应该包含策略逻辑
+async onBar(...) {
+  if (someCondition) {
+    // 自定义策略逻辑 - 禁止！
+  }
+}
+
+// ✅ 正确：Runner 只负责编排
+async onBar(...) {
+  const signal = trendStrategy(...); // 调用纯函数
+  await this.engine.executeEntry(...);
+}
+```
+
+### ❌ 禁止在 index.ts 中堆积业务逻辑
+
+```typescript
+// ❌ 错误：index.ts 不应该包含数据获取、指标计算等逻辑
+async function runBacktest() {
+  // 200+ 行的数据获取、指标计算逻辑 - 禁止！
+}
+
+// ✅ 正确：index.ts 使用服务层处理业务逻辑
+async function runBacktest() {
+  // 使用服务层
+  const data = await prepareBacktestData(instance);
+  const alignedIndicators = alignHTFIndicatorsToLTF(...);
+  // 只负责编排和结果展示
+}
+```
+
+### ❌ 禁止在 Engine 中实现策略逻辑
+
+```typescript
+// ❌ 错误：Engine 不应该包含策略决策
+async executeEntry(...) {
+  if (bar.close > someThreshold) { // 策略逻辑 - 禁止！
+    // ...
+  }
+}
+
+// ✅ 正确：Engine 只负责执行
+async executeEntry(instance, bar, signal, ltfIndicator) {
+  // 使用 signal 和 ltfIndicator，不自己做决策
+}
+```
+
+### ❌ 禁止使用全局变量或单例模式
+
+```typescript
+// ❌ 错误：全局状态
+let globalPositionStore: PositionStore;
+
+// ✅ 正确：每个实例独立
+class StrategyInstance {
+  private positionStore: PositionStore; // 实例级状态
+}
+```
+
+### ❌ 禁止在 Core Layer 中直接访问外部服务
+
+```typescript
+// ❌ 错误：Core Layer 不能依赖外部服务
+import axios from 'axios';
+export function trendStrategy(...) {
+  const data = await axios.get(...); // 禁止！
+}
+
+// ✅ 正确：数据通过参数传入
+export function trendStrategy({ bar, htfIndicator, ltfIndicator, positionState }) {
+  // 只使用传入的参数
+}
+```
+
+
+## 测试规范
+
+- 单元测试放在 `__tests__/` 目录下
+- 测试文件命名：`*.test.ts`
+- Core Layer 的纯函数**必须**有单元测试
+- 测试应该覆盖边界情况和错误情况
+
+## 文档规范
+
+- 所有导出的函数/类必须有 JSDoc 注释
+- 复杂逻辑必须有行内注释说明
+- 架构决策记录在 `.cursor/plans/` 目录下

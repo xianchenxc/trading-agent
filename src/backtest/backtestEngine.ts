@@ -1,9 +1,18 @@
-import { Config } from '../config';
+/**
+ * Legacy BacktestEngine for robustness check
+ * 
+ * NOTE: This is the OLD single-instance BacktestEngine, kept for robustness check tool.
+ * The NEW architecture uses engine/backtestEngine.ts which implements IEngine interface.
+ * 
+ * Do NOT use this in new code. Use engine/backtestEngine.ts instead.
+ */
+
+import { Config } from '../config/config';
 import { Kline, StrategySignal, TradeReason, BacktestResult, HTFIndicatorData, LTFIndicatorData } from '../types';
-import { trendStrategy } from '../strategy/trendStrategy';
-import { riskManager, calculatePositionSize } from '../risk/riskManager';
-import { PositionStore } from '../state/positionStore';
-import { TradeLogger } from '../logger/tradeLogger';
+import { trendStrategy } from '../core/strategy/trendStrategy';
+import { riskManager, calculatePositionSize } from '../core/risk/riskManager';
+import { PositionStore } from '../core/state/positionStore';
+import { TradeLogger } from '../core/logger/tradeLogger';
 
 interface BacktestContext {
   bar: Kline;
@@ -18,11 +27,12 @@ export class BacktestEngine {
   private config: Config;
   private klines: Kline[] = [];
 
-  constructor(config: Config) {
+  constructor(config: Config, silent: boolean = false) {
     this.config = config;
     this.positionStore = new PositionStore();
     this.logger = new TradeLogger();
     this.logger.setInitialCapital(config.backtest.initialCapital);
+    this.logger.setSilent(silent);
   }
 
   run(
@@ -162,6 +172,18 @@ export class BacktestEngine {
     const position = this.positionStore.get();
     if (!position) return;
 
+    // Calculate commission and slippage
+    const entryValue = position.entryPrice * position.size;
+    const exitValue = bar.close * position.size;
+    const commission = (entryValue + exitValue) * this.config.backtest.commissionRate;
+    
+    // Apply slippage (simplified: assume slippage on exit only)
+    const slippageMultiplier = position.side === "LONG" 
+      ? 1 - this.config.backtest.slippageRate 
+      : 1 + this.config.backtest.slippageRate;
+    const exitPriceWithSlippage = bar.close * slippageMultiplier;
+    const slippage = Math.abs(exitPriceWithSlippage - bar.close) * position.size;
+
     // Start closing process
     this.positionStore.dispatch({
       type: 'START_CLOSING',
@@ -171,12 +193,18 @@ export class BacktestEngine {
     this.positionStore.dispatch({
       type: 'CLOSE_POSITION',
       payload: {
-        exitPrice: bar.close,
+        exitPrice: exitPriceWithSlippage, // Use price with slippage
         exitTime: bar.closeTime,
       },
       reason: (reason as TradeReason) || 'MANUAL_EXIT',
     });
 
-    this.logger.logExit(bar, position, (reason as TradeReason) || 'MANUAL_EXIT');
+    // Create a temporary position with exit price for logging
+    const positionForLogging = { ...position };
+    this.logger.logExit(bar, positionForLogging, (reason as TradeReason) || 'MANUAL_EXIT', {
+      commission,
+      slippage,
+      exitPrice: exitPriceWithSlippage,
+    });
   }
 }

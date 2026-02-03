@@ -1,0 +1,258 @@
+---
+description: Architecture design specifications for three-layer structure (Instance/Core/Engine)
+alwaysApply: true
+---
+
+# 架构设计规范
+
+## 三层架构详解
+
+> 核心原则见 `000-core.mdc` 的"架构原则"部分
+
+### Instance Layer（实例层）
+
+**职责**: 管理策略实例的生命周期和编排
+
+**目录**: `src/instance/`
+
+**组件**:
+- `StrategyInstance`: 实例数据容器，持有配置和状态组件
+- `StrategyInstanceRunner`: 单个实例的执行器，编排 Core Layer 的调用
+- `InstanceOrchestrator`: 多实例编排器，协调并行执行
+
+**设计原则**:
+- 实例之间完全隔离，不共享任何状态（见 `000-core.mdc` 实例隔离原则）
+- Runner 的执行顺序：RiskManager → Strategy → Engine（不可改变，见 `000-core.mdc` 执行顺序保证）
+- Orchestrator 负责时间同步和并行执行
+
+**禁止事项**:
+- ❌ 禁止在 Instance Layer 中实现业务逻辑（策略、风控）
+- ❌ 禁止实例之间直接通信（见 `000-core.mdc` 实例隔离原则）
+- ❌ 禁止在 Runner 中修改策略逻辑（见 `000-core.mdc` 禁止事项）
+
+### Core Layer（核心业务逻辑层）
+
+**职责**: 实现核心业务逻辑，无状态或每个实例独立状态
+
+**目录**: `src/core/`
+
+**子模块**:
+- `strategy/`: 策略逻辑（纯函数）
+- `risk/`: 风控逻辑（纯函数）
+- `state/`: 状态管理（每个实例独立）
+- `logger/`: 日志记录（每个实例独立）
+
+**设计原则**:
+- **Strategy 和 RiskManager 必须是纯函数**（见 `000-core.mdc` 函数式优先原则）
+  - 无副作用
+  - 不依赖外部状态
+  - 输入确定，输出确定
+- **PositionStore 和 TradeLogger 是状态组件**
+  - 每个实例拥有独立实例
+  - 通过方法调用修改状态，不使用全局状态
+
+**禁止事项**:
+- ❌ 禁止在 Core Layer 中引入全局状态（见 `000-core.mdc` 禁止事项）
+- ❌ 禁止在 Core Layer 中直接访问外部服务（API、数据库）
+- ❌ 禁止 Strategy 和 RiskManager 之间相互调用（通过 Runner 编排）
+
+### Engine Layer（执行引擎层）
+
+**职责**: 抽象执行方式，处理回测/模拟/实盘的差异
+
+**目录**: `src/engine/`
+
+**组件**:
+- `IEngine`: 引擎接口，定义 `executeEntry` 和 `executeExit`
+- `BacktestEngine`: 回测引擎实现
+- `PaperEngine`: 模拟实盘引擎实现
+
+**设计原则**:
+- Engine 只负责执行，不包含策略逻辑
+- Engine 通过 `StrategyInstance` 访问状态组件（PositionStore, TradeLogger）
+- Engine 负责计算 commission 和 slippage（回测/模拟场景）
+
+**禁止事项**:
+- ❌ 禁止在 Engine 中实现策略决策逻辑（见 `000-core.mdc` 禁止事项）
+- ❌ 禁止 Engine 直接访问外部服务（应该通过参数传入）
+
+## 数据流
+
+### 回测模式数据流
+
+```
+index.ts (runBacktest)
+  ↓
+services/dataService.prepareBacktestData()
+  ↓
+DataFetcher.fetchKlinesForBacktest() → Kline[]
+  ↓
+indicators.buildHTFIndicators() → HTFIndicatorData[]
+indicators.buildLTFIndicators() → LTFIndicatorData[]
+  ↓
+services/timeAlignmentService.alignHTFIndicatorsToLTF()
+  ↓
+InstanceOrchestrator.runBacktest()
+  ↓ (对每个时间点)
+StrategyInstanceRunner.onBar(bar, htfIndicator, ltfIndicator)
+  ↓
+1. RiskManager.riskManager() → RiskDecision
+2. Strategy.trendStrategy() → StrategySignal
+3. Engine.executeEntry/executeExit()
+  ↓
+PositionStore.dispatch() / TradeLogger.logEntry/logExit()
+```
+
+### 模拟实盘模式数据流
+
+```
+index.ts (runPaperTrading)
+  ↓ (初始化)
+services/dataService.preparePaperTradingData() → 初始化历史数据
+  ↓ (循环)
+DataFetcher.fetchKlines() → 检查新K线
+  ↓ (有新K线)
+indicators.buildHTFIndicators() → 更新指标
+indicators.buildLTFIndicators() → 更新指标
+  ↓
+services/timeAlignmentService.findHTFIndicatorForLTFBar()
+  ↓
+InstanceOrchestrator.executeInstance()
+  ↓
+StrategyInstanceRunner.onBar() → (同上)
+```
+
+## 实例隔离机制
+
+> 核心原则见 `000-core.mdc` 的"实例隔离"部分
+
+### 状态隔离
+
+每个 `StrategyInstance` 拥有：
+- 独立的 `PositionStore` 实例
+- 独立的 `TradeLogger` 实例
+- 独立的配置（`Config`）
+
+```typescript
+// ✅ 正确：每个实例独立创建状态组件
+class StrategyInstance {
+  private positionStore: PositionStore; // 实例级
+  private logger: TradeLogger; // 实例级
+  
+  constructor(config: StrategyInstanceConfig) {
+    this.positionStore = new PositionStore(); // 新建实例
+    this.logger = new TradeLogger(); // 新建实例
+  }
+}
+```
+
+### 执行隔离
+
+- `InstanceOrchestrator` 使用 `Map<string, StrategyInstance>` 管理多个实例
+- 每个实例的 `StrategyInstanceRunner` 独立执行
+- 并行执行时使用 `Promise.all()`，但每个实例的状态完全独立
+
+## 配置驱动机制
+
+> 核心原则见 `000-core.mdc` 的"配置驱动"部分
+
+### 配置层级
+
+1. **基础配置** (`config/config.ts`): `Config` 接口和 `defaultConfig`
+2. **实例配置** (`config/instanceConfig.ts`): `InstanceConfigRegistry`，包含所有实例配置
+
+### 新增实例流程
+
+```typescript
+// 1. 在 instanceConfig.ts 中添加配置
+export const instanceConfigs: InstanceConfigRegistry = {
+  "NEW_SYMBOL_TREND_V1": {
+    instanceId: "NEW_SYMBOL_TREND_V1",
+    strategyName: "trendStrategy",
+    symbol: "NEW_SYMBOL",
+    config: { /* ... */ }
+  }
+};
+
+// 2. 代码自动加载（无需修改业务代码）
+for (const instanceConfig of Object.values(instanceConfigs)) {
+  const instance = new StrategyInstance(instanceConfig);
+  orchestrator.registerInstance(instance);
+}
+```
+
+**原则**: 新增实例 = 新增配置，不修改代码
+
+## 执行顺序保证
+
+> 核心原则见 `000-core.mdc` 的"执行顺序保证"部分
+
+### Runner 内部执行顺序
+
+```typescript
+async onBar(bar, htfIndicator, ltfIndicator) {
+  // 1️⃣ 风控优先（检查止损、更新 trailing stop）
+  if (position && positionState === "OPEN") {
+    const riskResult = riskManager(...);
+    if (riskResult.decision.action === 'EXIT') {
+      await this.engine.executeExit(...);
+      return; // 风控退出，不再执行策略
+    }
+  }
+  
+  // 2️⃣ 策略决策
+  const signal = trendStrategy(...);
+  
+  // 3️⃣ 执行引擎
+  if (signal.type === "ENTRY") {
+    await this.engine.executeEntry(...);
+  } else if (signal.type === "EXIT") {
+    await this.engine.executeExit(...);
+  }
+}
+```
+
+**为什么这个顺序不能改变**:
+- 风控必须优先于策略决策，确保止损及时执行
+- 策略决策依赖当前持仓状态（由风控更新）
+- 引擎执行依赖策略信号
+
+## 时间同步机制
+
+### 回测模式
+
+- `InstanceOrchestrator.runBacktest()` 构建统一时间轴
+- 对每个时间点，执行所有有数据的实例
+- 不同 symbol 的K线时间可能不完全同步，跳过缺失数据的实例
+
+### 模拟实盘模式
+
+- 每个实例独立检查新K线
+- 检测到新K线时立即执行，不等待其他实例
+- 不同 symbol 的K线时间可能不同步，这是正常的
+
+## 错误处理
+
+- 关键路径使用 try-catch 处理错误
+- 错误信息应包含足够的上下文（instanceId、操作类型等）
+- 单个实例的错误不应影响其他实例的执行
+
+## 扩展性设计
+
+### 新增策略
+
+1. 在 `core/strategy/` 中实现新的策略函数（纯函数）
+2. 在 `instanceConfig.ts` 中配置 `strategyName`
+3. 在 `StrategyInstanceRunner` 中根据 `strategyName` 选择策略函数
+
+### 新增引擎
+
+1. 实现 `IEngine` 接口
+2. 在 `index.ts` 中根据模式选择引擎
+3. 引擎实现应该与策略逻辑解耦
+
+### 新增指标
+
+1. 在 `indicators/indicators.ts` 中实现指标计算函数（纯函数）
+2. 在 `Config` 接口中添加指标参数
+3. 在 `buildHTFIndicators` 或 `buildLTFIndicators` 中调用

@@ -7,7 +7,7 @@ import {
   LTFIndicatorData,
   HTFTrendState,
   HTFContext
-} from "../types";
+} from "../../types";
 
 /**
  * Multi-Timeframe Trend Strategy (v3)

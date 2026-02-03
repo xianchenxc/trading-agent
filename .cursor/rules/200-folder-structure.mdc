@@ -1,0 +1,257 @@
+---
+description: Directory structure and file organization standards for the trading agent platform
+alwaysApply: true
+---
+
+# 目录结构规范
+
+## 目录层级
+
+```
+src/
+├── instance/          # Instance Layer（实例层）
+├── core/             # Core Layer（核心业务逻辑层）
+├── engine/           # Engine Layer（执行引擎层）
+├── config/           # 配置层
+├── data/             # 数据层
+├── indicators/       # 指标层
+├── services/         # 服务层（数据准备、时间对齐等）
+├── utils/            # 工具函数层（通用工具函数）
+├── backtest/         # 回测工具（特殊用途）
+├── types.ts          # 类型定义（跨模块共享）
+└── index.ts          # 程序入口
+```
+
+## 目录职责
+
+### instance/ - 实例层
+
+**职责**: 管理策略实例的生命周期和编排
+
+**文件**:
+- `strategyInstance.ts`: 策略实例数据容器
+- `strategyInstanceRunner.ts`: 单个实例执行器
+- `instanceOrchestrator.ts`: 多实例编排器
+
+**规则**:
+- ✅ 可以依赖 `core/` 和 `engine/`
+- ❌ 不能依赖 `data/`、`indicators/`（应该通过参数传入）
+- ❌ 不能包含业务逻辑（策略、风控）（见 `100-architecture.mdc` Instance Layer 禁止事项）
+
+### core/ - 核心业务逻辑层
+
+**职责**: 实现核心业务逻辑
+
+**子目录**:
+- `strategy/`: 策略逻辑（纯函数）
+- `risk/`: 风控逻辑（纯函数）
+- `state/`: 状态管理（每个实例独立）
+- `logger/`: 日志记录（每个实例独立）
+
+**规则**:
+- ✅ `strategy/` 和 `risk/` 必须是纯函数，无副作用（见 `000-core.mdc` 函数式优先原则）
+- ✅ `state/` 和 `logger/` 是状态组件，每个实例独立
+- ❌ 不能依赖 `instance/`、`engine/`、`data/`
+- ❌ 不能直接访问外部服务（API、数据库）（见 `000-core.mdc` 禁止事项）
+
+**文件命名**:
+- `trendStrategy.ts`: 策略函数文件，使用策略名称
+- `riskManager.ts`: 风控管理器，导出纯函数
+- `positionStore.ts`: 状态存储，使用状态机模式
+- `tradeLogger.ts`: 交易日志记录器
+
+### engine/ - 执行引擎层
+
+**职责**: 抽象执行方式，处理回测/模拟/实盘的差异
+
+**文件**:
+- `IEngine.ts`: 引擎接口
+- `backtestEngine.ts`: 回测引擎实现
+- `paperEngine.ts`: 模拟实盘引擎实现
+
+**规则**:
+- ✅ 实现 `IEngine` 接口
+- ✅ 可以依赖 `core/` 的工具函数（如 `calculatePositionSize`）
+- ❌ 不能包含策略逻辑（见 `100-architecture.mdc` Engine Layer 禁止事项）
+- ❌ 不能直接访问外部服务（应该通过参数传入）
+
+### config/ - 配置层
+
+**职责**: 集中管理所有配置
+
+**文件**:
+- `config.ts`: 基础配置接口和默认值
+- `instanceConfig.ts`: 实例配置注册表
+
+**规则**:
+- ✅ 配置是数据的唯一来源
+- ✅ 新增实例只需添加配置，不修改代码
+- ❌ 不能包含业务逻辑
+
+**配置结构**:
+```typescript
+// config.ts: 基础配置
+export interface Config { /* ... */ }
+export const defaultConfig: Config = { /* ... */ }
+
+// instanceConfig.ts: 实例配置注册表
+export interface InstanceConfigRegistry {
+  [instanceId: string]: StrategyInstanceConfig;
+}
+export const instanceConfigs: InstanceConfigRegistry = { /* ... */ }
+```
+
+### data/ - 数据层
+
+**职责**: 数据获取和缓存
+
+**文件**:
+- `fetcher.ts`: 数据获取器（从 Binance API）
+- `cache.ts`: 本地缓存管理器
+
+**规则**:
+- ✅ 只负责数据获取，不包含业务逻辑
+- ✅ 支持缓存以减少 API 请求
+- ❌ 不能依赖 `core/`、`instance/`、`engine/`
+
+### indicators/ - 指标层
+
+**职责**: 技术指标计算
+
+**文件**:
+- `indicators.ts`: 指标计算函数（纯函数）
+- `__tests__/indicators.test.ts`: 单元测试
+
+**规则**:
+- ✅ 所有指标计算函数必须是纯函数
+- ✅ 不依赖外部状态
+- ❌ 不能依赖 `core/`、`instance/`、`engine/`
+
+**函数命名**:
+- `buildHTFIndicators()`: 构建 HTF 指标
+- `buildLTFIndicators()`: 构建 LTF 指标
+- `calculateEMA()`: 计算 EMA（内部函数）
+- `calculateATR()`: 计算 ATR（内部函数）
+- `calculateADX()`: 计算 ADX（内部函数）
+
+### backtest/ - 回测工具
+
+**职责**: 特殊用途的回测工具（robustness check）
+
+**文件**:
+- `backtestEngine.ts`: 旧的单实例回测引擎（用于 robustness check）
+- `robustnessCheck.ts`: 参数鲁棒性测试工具
+
+**规则**:
+- ⚠️ 这是**特殊用途**的工具，不遵循新架构
+- ⚠️ `backtestEngine.ts` 是旧架构的遗留，与新架构的 `engine/backtestEngine.ts` 不同
+- ✅ 保留用于 robustness check，不应在新代码中使用
+
+### services/ - 服务层
+
+**职责**: 提供跨层服务，处理数据准备和时间对齐等通用逻辑
+
+**文件**:
+- `dataService.ts`: 数据获取和指标计算服务
+- `timeAlignmentService.ts`: HTF/LTF 时间对齐服务
+
+**规则**:
+- ✅ 可以依赖 `data/` 和 `indicators/`
+- ✅ 可以被 `index.ts` 和其他入口文件使用
+- ❌ 不能依赖 `core/`、`instance/`、`engine/`（避免循环依赖）
+- ❌ 不应包含业务逻辑（策略、风控）
+
+**设计原则**:
+- 服务函数应该是纯函数或接近纯函数（只依赖输入参数）
+- 服务层用于解耦 `index.ts` 和底层数据/指标层
+
+**函数示例**:
+- `prepareBacktestData()`: 准备回测数据（数据获取 + 指标计算）
+- `preparePaperTradingData()`: 准备模拟实盘数据
+- `alignHTFIndicatorsToLTF()`: HTF/LTF 时间对齐
+- `findHTFIndicatorForLTFBar()`: 为单个 LTF bar 查找对应的 HTF indicator
+
+### utils/ - 工具函数层
+
+**职责**: 提供通用工具函数
+
+**文件**:
+- `timeUtils.ts`: 时间相关工具函数
+
+**规则**:
+- ✅ 工具函数应该是纯函数
+- ✅ 可以被任何层使用
+- ❌ 不应包含业务逻辑
+
+**函数示例**:
+- `getIntervalMs()`: 将时间间隔字符串转换为毫秒
+
+### types.ts - 类型定义
+
+**职责**: 跨模块共享的类型定义
+
+**规则**:
+- ✅ 只包含跨模块共享的基础类型
+- ❌ 模块特定的类型应该放在对应模块中
+
+### index.ts - 程序入口
+
+**职责**: 程序入口和模式分发
+
+**规则**:
+- ✅ 只负责解析命令行参数和调用对应的模式函数
+- ✅ 使用 `services/` 层处理数据准备逻辑
+- ❌ 不应包含数据获取、指标计算等业务逻辑
+
+## 文件命名规范
+
+命名规范详见 `000-core.mdc` 的"命名规范"部分。
+
+**文件命名补充规则**:
+- 测试文件：`*.test.ts`，放在 `__tests__/` 目录下
+- 文件名应该反映文件的主要内容
+
+## 导入路径规范
+
+### 相对路径规则
+
+- 同一目录内：`./filename`
+- 上级目录：`../filename`
+- 跨层导入：使用完整相对路径（如 `../../core/strategy/trendStrategy`）
+
+### 禁止的导入
+
+- ❌ 禁止循环依赖
+- ❌ 禁止跨层反向依赖（如 `core/` 不能导入 `instance/`）
+- ❌ 禁止使用绝对路径（如 `/src/core/...`）
+
+### 导入顺序建议
+
+```typescript
+// 1. 外部依赖
+import axios from 'axios';
+
+// 2. 类型定义
+import { Kline, StrategySignal } from '../types';
+
+// 3. 同层模块
+import { StrategyInstance } from './strategyInstance';
+
+// 4. 下层模块
+import { trendStrategy } from '../core/strategy/trendStrategy';
+```
+
+## 新增文件检查清单
+
+添加新文件前，检查：
+
+1. ✅ 文件是否放在正确的目录？
+2. ✅ 文件名是否符合命名规范？
+3. ✅ 导入路径是否正确？
+4. ✅ 是否遵循了分层规则（不能跨层反向依赖）？
+5. ✅ 如果是 Core Layer 的函数，是否是纯函数？
+6. ✅ 如果是 Instance Layer，是否不包含业务逻辑？
+7. ✅ 如果是 Engine Layer，是否实现了 `IEngine` 接口？
+8. ✅ 如果是 Services Layer，是否不包含业务逻辑（策略、风控）？
+9. ✅ 如果是 Utils Layer，是否是纯函数？
+

@@ -3,7 +3,7 @@
  * EMA, ATR, and ADX implementations
  */
 
-import { Config } from "../config";
+import { Config } from "../config/config";
 import { Kline, IndicatorData, HTFIndicatorData, LTFIndicatorData } from "../types";
 
 /**
@@ -223,13 +223,13 @@ export function buildIndicators(klines: Kline[], config: Config['indicators']): 
 
 /**
  * Build Higher Timeframe (HTF) indicators (4h)
- * Returns: EMA50, EMA200, ADX(14)
+ * Returns: EMA(medium), EMA(long), ADX(period from config)
  */
 export function buildHTFIndicators(klines: Kline[], config: Config['indicators']): HTFIndicatorData[] {
   const closes = klines.map(k => k.close);
 
-  const ema50 = calculateEMA(closes, 50);
-  const ema200 = calculateEMA(closes, 200);
+  const ema50 = calculateEMA(closes, config.ema.medium);
+  const ema200 = calculateEMA(closes, config.ema.long);
   const { adx } = calculateADX(klines, config.adx.period);
 
   return klines.map((k, i) => ({
@@ -241,17 +241,17 @@ export function buildHTFIndicators(klines: Kline[], config: Config['indicators']
 
 /**
  * Build Lower Timeframe (LTF) indicators (1h)
- * Returns: EMA20, EMA50, ADX(14), ATR(14), Donchian High
+ * Returns: EMA(short), EMA(medium), ADX, ATR, Donchian High
  */
 export function buildLTFIndicators(
-  klines: Kline[], 
+  klines: Kline[],
   config: Config['indicators'],
   donchianLookback: number = 20
 ): LTFIndicatorData[] {
   const closes = klines.map(k => k.close);
 
-  const ema20 = calculateEMA(closes, 20);
-  const ema50 = calculateEMA(closes, 50);
+  const ema20 = calculateEMA(closes, config.ema.short);
+  const ema50 = calculateEMA(closes, config.ema.medium);
   const atr = calculateATR(klines, config.atr.period);
   const { adx } = calculateADX(klines, config.adx.period);
 

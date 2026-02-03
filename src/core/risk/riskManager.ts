@@ -1,5 +1,5 @@
-import { Position, TradeReason, RiskDecision, LTFIndicatorData } from '../types';
-import { Config } from '../config';
+import { Position, TradeReason, RiskDecision, LTFIndicatorData } from '../../types';
+import { Config } from '../../config/config';
 
 /**
  * Risk Manager (MVP v5: Trend Exhaustion Filter + Profit Lock)

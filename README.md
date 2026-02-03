@@ -15,22 +15,33 @@ MVP级加密货币趋势跟随Trading Agent，使用TypeScript开发，支持回
 
 ```
 src/
- ├── data/
- │   ├── fetcher.ts        # K线数据获取
- │   └── indicators.ts     # 技术指标计算（EMA/ATR）
- ├── strategy/
- │   └── trendStrategy.ts  # 趋势跟随策略逻辑
- ├── risk/
- │   └── riskManager.ts    # 仓位管理和风控
- ├── execution/
- │   └── exchange.ts       # 交易执行接口（模拟/实盘）
- ├── state/
- │   └── positionStore.ts  # 持仓状态管理
- ├── backtest/
- │   └── backtestEngine.ts # 回测引擎
- ├── logger/
- │   └── tradeLogger.ts    # 交易日志
- ├── config.ts             # 配置参数
+ ├── instance/             # Instance Layer（实例层）
+ │   ├── strategyInstance.ts
+ │   ├── strategyInstanceRunner.ts
+ │   └── instanceOrchestrator.ts
+ ├── core/                 # Core Layer（核心业务逻辑层）
+ │   ├── strategy/
+ │   │   └── trendStrategy.ts
+ │   ├── risk/
+ │   │   └── riskManager.ts
+ │   ├── state/
+ │   │   └── positionStore.ts
+ │   └── logger/
+ │       └── tradeLogger.ts
+ ├── engine/               # Engine Layer（执行引擎层）
+ │   ├── IEngine.ts
+ │   └── backtestEngine.ts
+ ├── config/               # 配置层
+ │   ├── config.ts
+ │   └── instanceConfig.ts
+ ├── data/                 # 数据层
+ │   ├── fetcher.ts
+ │   └── cache.ts
+ ├── indicators/           # 指标层
+ │   └── indicators.ts
+ ├── backtest/             # 回测工具（保留用于 robustness check）
+ │   ├── backtestEngine.ts
+ │   └── robustnessCheck.ts
  ├── types.ts              # 类型定义
  └── index.ts              # 程序入口
 ```
@@ -89,11 +100,13 @@ npm run dev
 
 ## 配置
 
-所有关键参数在 `src/config.ts` 中集中配置，包括：
+所有关键参数在 `src/config/config.ts` 中集中配置，包括：
 - 交易所设置
 - 策略参数
 - 风控参数
 - 回测参数
+
+策略实例配置在 `src/config/instanceConfig.ts` 中管理，新增策略实例只需添加配置即可。
 
 ## 扩展性
 
