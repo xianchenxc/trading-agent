@@ -9,7 +9,8 @@
     "dev": "ts-node src/index.ts",
     "backtest": "ts-node src/index.ts --mode=backtest",
     "paper": "ts-node src/index.ts --mode=paper",
-    "robustness": "ts-node src/robustness.ts",
+    "live": "ts-node src/index.ts --mode=live",
+    "robustness": "ts-node src/tools/robustness.ts",
     "test": "jest",
     "test:watch": "jest --watch"
   },

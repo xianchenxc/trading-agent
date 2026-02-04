@@ -1,5 +1,6 @@
 import { Config } from './config';
 import { StrategyInstanceConfig } from '../instance/strategyInstance';
+import { globalConfig } from './globalConfig';
 
 /**
  * Config Registry: 集中管理所有实例配置
@@ -17,8 +18,7 @@ export const instanceConfigs: InstanceConfigRegistry = {
     instanceId: "BTCUSDT_TREND_V1",
     strategyName: "trendStrategy",
     symbol: "BTCUSDT",
-    config: {
-      exchange: { baseUrl: "https://api.binance.com", symbol: "BTCUSDT" },
+      config: {
       timeframe: { trend: "4h", signal: "1h" },
       indicators: { 
         ema: { short: 20, medium: 50, long: 200 }, 
@@ -35,14 +35,12 @@ export const instanceConfigs: InstanceConfigRegistry = {
         trendExhaustBars: 3,
         profitLockR: 4.0,
       },
+      account: { initialCapital: 10000 },
+      execution: { commissionRate: 0.001, slippageRate: 0.0005 },
       backtest: { 
-        initialCapital: 10000, 
-        commissionRate: 0.001, 
-        slippageRate: 0.0005, 
         startDate: "2025-01-01", 
         endDate: "2026-01-01" 
       },
-      cache: { enabled: true, directory: "data/cache" },
     },
   },
   // "ETHUSDT_TREND_V1": {

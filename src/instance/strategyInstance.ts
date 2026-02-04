@@ -27,7 +27,7 @@ export class StrategyInstance {
     // 每个实例拥有独立的状态组件
     this.positionStore = new PositionStore();
     this.logger = new TradeLogger();
-    this.logger.setInitialCapital(config.config.backtest.initialCapital);
+    this.logger.setInitialCapital(config.config.account.initialCapital);
   }
   
   getPositionStore(): PositionStore {

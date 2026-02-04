@@ -9,20 +9,34 @@ alwaysApply: true
 
 ```
 src/
-├── instance/          # Instance Layer（实例层）
+├── commands/         # 入口命令（backtest / paper / live）
+├── instance/         # Instance Layer（实例层）
 ├── core/             # Core Layer（核心业务逻辑层）
 ├── engine/           # Engine Layer（执行引擎层）
 ├── config/           # 配置层
-├── data/             # 数据层
-├── indicators/       # 指标层
+├── data/             # 数据层（拉取、缓存、指标计算）
 ├── services/         # 服务层（数据准备、时间对齐等）
+├── tools/            # 工具（robustness 等特殊用途，非主架构）
 ├── utils/            # 工具函数层（通用工具函数）
-├── backtest/         # 回测工具（特殊用途）
 ├── types.ts          # 类型定义（跨模块共享）
 └── index.ts          # 程序入口
 ```
 
 ## 目录职责
+
+### commands/ - 入口命令
+
+**职责**: 按模式拆分的入口逻辑（回测 / 模拟盘 / 实盘）
+
+**文件**:
+- `backtest.ts`: 回测命令，导出 `runBacktest()`
+- `paper.ts`: 模拟盘命令，导出 `runPaperTrading()`
+- `live.ts`: 实盘命令，导出 `runLiveTrading()`（占位或实现）
+
+**规则**:
+- ✅ 由 `index.ts` 根据 `--mode=` 调用对应 command
+- ✅ 可依赖 `engine/`、`instance/`、`config/`、`services/` 等
+- ❌ 不在 command 内堆积数据获取、指标计算，使用 services 层
 
 ### instance/ - 实例层
 
@@ -35,7 +49,7 @@ src/
 
 **规则**:
 - ✅ 可以依赖 `core/` 和 `engine/`
-- ❌ 不能依赖 `data/`、`indicators/`（应该通过参数传入）
+- ❌ 不能依赖 `data/`（应该通过参数传入）
 - ❌ 不能包含业务逻辑（策略、风控）（见 `100-architecture.mdc` Instance Layer 禁止事项）
 
 ### core/ - 核心业务逻辑层
@@ -80,7 +94,8 @@ src/
 **职责**: 集中管理所有配置
 
 **文件**:
-- `config.ts`: 基础配置接口和默认值
+- `globalConfig.ts`: 全局基础设施配置（exchange.baseUrl, cache）- 所有实例共享
+- `config.ts`: 实例配置接口（StrategyConfig + RuntimeConfig）
 - `instanceConfig.ts`: 实例配置注册表
 
 **规则**:
@@ -90,62 +105,62 @@ src/
 
 **配置结构**:
 ```typescript
-// config.ts: 基础配置
-export interface Config { /* ... */ }
-export const defaultConfig: Config = { /* ... */ }
+// globalConfig.ts: 全局基础设施配置（所有实例共享）
+export interface GlobalConfig {
+  exchange: { baseUrl: string };
+  cache: { enabled: boolean; directory: string };
+}
+
+// config.ts: 实例配置（每个实例独立）
+export interface StrategyConfig { /* 策略参数 */ }
+export interface RuntimeConfig { /* 运行时参数 */ }
+export interface Config extends StrategyConfig, RuntimeConfig {}
 
 // instanceConfig.ts: 实例配置注册表
 export interface InstanceConfigRegistry {
-  [instanceId: string]: StrategyInstanceConfig;
+  [instanceId: string]: StrategyInstanceConfig; // symbol 在顶层，不在 config.exchange.symbol
 }
-export const instanceConfigs: InstanceConfigRegistry = { /* ... */ }
 ```
+
+**配置分离原则**:
+- **全局配置** (`globalConfig.ts`): 基础设施（exchange.baseUrl, cache）- 所有实例共享，不重复配置
+- **实例配置** (`config.ts`): 策略参数（timeframe, indicators, strategy, risk）+ 运行时参数（account, execution, backtest）- 每个实例独立
+- **symbol**: 在 `StrategyInstanceConfig` 顶层，不在 `config.exchange.symbol`（避免冗余）
 
 ### data/ - 数据层
 
-**职责**: 数据获取和缓存
+**职责**: 数据获取、缓存、技术指标计算
 
 **文件**:
 - `fetcher.ts`: 数据获取器（从 Binance API）
 - `cache.ts`: 本地缓存管理器
-
-**规则**:
-- ✅ 只负责数据获取，不包含业务逻辑
-- ✅ 支持缓存以减少 API 请求
-- ❌ 不能依赖 `core/`、`instance/`、`engine/`
-
-### indicators/ - 指标层
-
-**职责**: 技术指标计算
-
-**文件**:
 - `indicators.ts`: 指标计算函数（纯函数）
-- `__tests__/indicators.test.ts`: 单元测试
+- `__tests__/indicators.test.ts`: 指标单元测试
 
 **规则**:
-- ✅ 所有指标计算函数必须是纯函数
-- ✅ 不依赖外部状态
+- ✅ 只负责数据与指标，不包含业务逻辑（策略、风控）
+- ✅ 支持缓存以减少 API 请求
+- ✅ 指标计算函数必须是纯函数，不依赖外部状态
 - ❌ 不能依赖 `core/`、`instance/`、`engine/`
 
-**函数命名**:
+**指标函数命名**:
 - `buildHTFIndicators()`: 构建 HTF 指标
 - `buildLTFIndicators()`: 构建 LTF 指标
-- `calculateEMA()`: 计算 EMA（内部函数）
-- `calculateATR()`: 计算 ATR（内部函数）
-- `calculateADX()`: 计算 ADX（内部函数）
+- `calculateADX()`: 计算 ADX（可导出供测试）
 
-### backtest/ - 回测工具
+### tools/ - 工具
 
-**职责**: 特殊用途的回测工具（robustness check）
+**职责**: 特殊用途工具（非主架构流程）
 
 **文件**:
-- `backtestEngine.ts`: 旧的单实例回测引擎（用于 robustness check）
-- `robustnessCheck.ts`: 参数鲁棒性测试工具
+- `backtest/backtestEngine.ts`: 旧单实例回测引擎（仅用于 robustness）
+- `backtest/robustnessCheck.ts`: 参数鲁棒性测试
+- `robustness.ts`: robustness 命令入口
 
 **规则**:
-- ⚠️ 这是**特殊用途**的工具，不遵循新架构
-- ⚠️ `backtestEngine.ts` 是旧架构的遗留，与新架构的 `engine/backtestEngine.ts` 不同
-- ✅ 保留用于 robustness check，不应在新代码中使用
+- ⚠️ 不遵循主架构三层，仅用于独立工具（如 `npm run robustness`）
+- ⚠️ `tools/backtest/backtestEngine.ts` 与 `engine/backtestEngine.ts` 不同，新代码应使用 engine
+- ✅ 可依赖 `data/`、`config/`、`core/` 等
 
 ### services/ - 服务层
 
@@ -156,7 +171,7 @@ export const instanceConfigs: InstanceConfigRegistry = { /* ... */ }
 - `timeAlignmentService.ts`: HTF/LTF 时间对齐服务
 
 **规则**:
-- ✅ 可以依赖 `data/` 和 `indicators/`
+- ✅ 可以依赖 `data/`
 - ✅ 可以被 `index.ts` 和其他入口文件使用
 - ❌ 不能依赖 `core/`、`instance/`、`engine/`（避免循环依赖）
 - ❌ 不应包含业务逻辑（策略、风控）
@@ -177,14 +192,18 @@ export const instanceConfigs: InstanceConfigRegistry = { /* ... */ }
 
 **文件**:
 - `timeUtils.ts`: 时间相关工具函数
+- `logger.ts`: 日志工具（单例模式，提供结构化日志）
+- `slippageUtils.ts`: 滑点计算工具函数
 
 **规则**:
-- ✅ 工具函数应该是纯函数
+- ✅ 工具函数应该是纯函数（logger 例外，使用单例模式）
 - ✅ 可以被任何层使用
-- ❌ 不应包含业务逻辑
+- ❌ 不应包含业务逻辑（策略、风控）
 
 **函数示例**:
 - `getIntervalMs()`: 将时间间隔字符串转换为毫秒
+- `logInfo()`, `logError()`, `logWarn()`: 日志记录函数
+- `calculateDynamicSlippage()`: 基于 ATR 的动态滑点计算
 
 ### types.ts - 类型定义
 

@@ -87,8 +87,8 @@ services/dataService.prepareBacktestData()
   ↓
 DataFetcher.fetchKlinesForBacktest() → Kline[]
   ↓
-indicators.buildHTFIndicators() → HTFIndicatorData[]
-indicators.buildLTFIndicators() → LTFIndicatorData[]
+data/indicators.buildHTFIndicators() → HTFIndicatorData[]
+data/indicators.buildLTFIndicators() → LTFIndicatorData[]
   ↓
 services/timeAlignmentService.alignHTFIndicatorsToLTF()
   ↓
@@ -112,8 +112,8 @@ services/dataService.preparePaperTradingData() → 初始化历史数据
   ↓ (循环)
 DataFetcher.fetchKlines() → 检查新K线
   ↓ (有新K线)
-indicators.buildHTFIndicators() → 更新指标
-indicators.buildLTFIndicators() → 更新指标
+data/indicators.buildHTFIndicators() → 更新指标
+data/indicators.buildLTFIndicators() → 更新指标
   ↓
 services/timeAlignmentService.findHTFIndicatorForLTFBar()
   ↓
@@ -253,6 +253,6 @@ async onBar(bar, htfIndicator, ltfIndicator) {
 
 ### 新增指标
 
-1. 在 `indicators/indicators.ts` 中实现指标计算函数（纯函数）
+1. 在 `data/indicators.ts` 中实现指标计算函数（纯函数）
 2. 在 `Config` 接口中添加指标参数
 3. 在 `buildHTFIndicators` 或 `buildLTFIndicators` 中调用

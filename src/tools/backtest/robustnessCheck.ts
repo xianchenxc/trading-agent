@@ -1,19 +1,20 @@
 /**
  * Robustness Check for v5 Strategy
  * Tests 27 parameter combinations to verify stability
- * 
+ *
  * Parameters tested:
  * - trendExhaustADX: [18, 20, 22]
  * - trendExhaustBars: [2, 3, 4]
  * - profitLockR: [off, 3.0, 4.0]
- * 
+ *
  * Total combinations: 3 × 3 × 3 = 27
  */
 
-import { DataFetcher } from '../data/fetcher';
-import { BacktestEngine } from './backtestEngine';
-import { defaultConfig, Config } from '../config/config';
-import { HTFIndicatorData, BacktestResult } from '../types';
+import { DataFetcher } from "../../data/fetcher";
+import { BacktestEngine } from "./backtestEngine";
+import { defaultConfig, Config } from "../../config/config";
+import { globalConfig } from "../../config/globalConfig";
+import { HTFIndicatorData, BacktestResult } from "../../types";
 
 export interface RobustnessResult {
   trendExhaustADX: number;
@@ -50,14 +51,15 @@ export interface RobustnessReport {
  * Run robustness check with all parameter combinations
  */
 export async function runRobustnessCheck(): Promise<RobustnessReport> {
-  const baseConfig = defaultConfig;
-  
-  // Ensure backtest dates are correct
-  baseConfig.backtest.startDate = "2025-01-01";
-  baseConfig.backtest.endDate = "2026-01-01";
-  baseConfig.exchange.symbol = "ETHUSDT";
+  const baseConfig: Config = {
+    ...defaultConfig,
+    backtest: {
+      startDate: "2025-01-01",
+      endDate: "2026-01-01",
+    },
+  };
+  const symbol = "ETHUSDT";
 
-  // Parameter ranges
   const trendExhaustADXValues = [18, 20, 22];
   const trendExhaustBarsValues = [2, 3, 4];
   const profitLockRValues: (number | "off")[] = ["off", 3.0, 4.0];
@@ -65,35 +67,34 @@ export async function runRobustnessCheck(): Promise<RobustnessReport> {
   console.log("=".repeat(80));
   console.log("🧠 v5 Strategy Robustness Check");
   console.log("=".repeat(80));
-  console.log(`Symbol: ${baseConfig.exchange.symbol}`);
-  console.log(`Period: ${baseConfig.backtest.startDate} ~ ${baseConfig.backtest.endDate}`);
+  console.log(`Symbol: ${symbol}`);
+  console.log(`Period: ${baseConfig.backtest!.startDate} ~ ${baseConfig.backtest!.endDate}`);
   console.log(`Total Combinations: ${trendExhaustADXValues.length * trendExhaustBarsValues.length * profitLockRValues.length}`);
   console.log("=".repeat(80));
   console.log();
 
-  // Fetch data once (reused for all combinations)
   console.log("📊 Fetching historical data...");
   const fetcher = new DataFetcher(
-    baseConfig.exchange.baseUrl,
-    baseConfig.cache.enabled,
-    baseConfig.cache.directory
+    globalConfig.exchange.baseUrl,
+    globalConfig.cache.enabled,
+    globalConfig.cache.directory
   );
 
-  const startDate = new Date(baseConfig.backtest.startDate);
-  const endDate = new Date(baseConfig.backtest.endDate);
+  const startDate = new Date(baseConfig.backtest!.startDate);
+  const endDate = new Date(baseConfig.backtest!.endDate);
   startDate.setHours(0, 0, 0, 0);
   endDate.setHours(0, 0, 0, 0);
   const startTime = startDate.getTime();
   const endTime = endDate.getTime();
 
   const htfKlines = await fetcher.fetchKlinesForBacktest(
-    baseConfig.exchange.symbol,
+    symbol,
     baseConfig.timeframe.trend,
     startTime,
     endTime
   );
   const ltfKlines = await fetcher.fetchKlinesForBacktest(
-    baseConfig.exchange.symbol,
+    symbol,
     baseConfig.timeframe.signal,
     startTime,
     endTime
@@ -102,13 +103,11 @@ export async function runRobustnessCheck(): Promise<RobustnessReport> {
   console.log(`Fetched ${htfKlines.length} HTF klines, ${ltfKlines.length} LTF klines`);
   console.log();
 
-  // Calculate indicators once (reused for all combinations)
   console.log("📈 Calculating indicators...");
-  const { buildHTFIndicators, buildLTFIndicators } = await import("../indicators/indicators");
+  const { buildHTFIndicators, buildLTFIndicators } = await import("../../data/indicators");
   const htfIndicators = buildHTFIndicators(htfKlines, baseConfig.indicators);
   const ltfIndicators = buildLTFIndicators(ltfKlines, baseConfig.indicators, baseConfig.strategy.lookbackPeriod);
 
-  // Map HTF indicators to LTF bars
   const mappedHTFIndicators: HTFIndicatorData[] = [];
   for (const ltfBar of ltfKlines) {
     let matchedHTFIndicator: HTFIndicatorData | null = null;
@@ -128,7 +127,6 @@ export async function runRobustnessCheck(): Promise<RobustnessReport> {
   console.log("Indicators calculated");
   console.log();
 
-  // Run all parameter combinations
   const results: RobustnessResult[] = [];
   let combinationIndex = 0;
   const totalCombinations = trendExhaustADXValues.length * trendExhaustBarsValues.length * profitLockRValues.length;
@@ -140,8 +138,7 @@ export async function runRobustnessCheck(): Promise<RobustnessReport> {
     for (const trendExhaustBars of trendExhaustBarsValues) {
       for (const profitLockR of profitLockRValues) {
         combinationIndex++;
-        
-        // Create config with current parameters
+
         const config: Config = {
           ...baseConfig,
           risk: {
@@ -152,7 +149,6 @@ export async function runRobustnessCheck(): Promise<RobustnessReport> {
           },
         };
 
-        // Run backtest (silent mode to reduce output)
         const engine = new BacktestEngine(config, true);
         const backtestResult = engine.run(
           ltfKlines,
@@ -160,17 +156,16 @@ export async function runRobustnessCheck(): Promise<RobustnessReport> {
           ltfIndicators
         );
 
-        // Extract metrics
-        const totalReturnPct = ((backtestResult.finalEquity - config.backtest.initialCapital) / config.backtest.initialCapital) * 100;
-        const maxDrawdownPct = (backtestResult.stats.maxDrawdown / config.backtest.initialCapital) * 100;
-        
+        const totalReturnPct = ((backtestResult.finalEquity - config.account.initialCapital) / config.account.initialCapital) * 100;
+        const maxDrawdownPct = (backtestResult.stats.maxDrawdown / config.account.initialCapital) * 100;
+
         const winningTrades = backtestResult.trades.filter(t => t.pnl > 0);
         const losingTrades = backtestResult.trades.filter(t => t.pnl < 0);
-        const avgWin = winningTrades.length > 0 
-          ? winningTrades.reduce((sum, t) => sum + t.pnl, 0) / winningTrades.length 
+        const avgWin = winningTrades.length > 0
+          ? winningTrades.reduce((sum, t) => sum + t.pnl, 0) / winningTrades.length
           : 0;
-        const avgLoss = losingTrades.length > 0 
-          ? Math.abs(losingTrades.reduce((sum, t) => sum + t.pnl, 0) / losingTrades.length) 
+        const avgLoss = losingTrades.length > 0
+          ? Math.abs(losingTrades.reduce((sum, t) => sum + t.pnl, 0) / losingTrades.length)
           : 0;
 
         const result: RobustnessResult = {
@@ -189,7 +184,6 @@ export async function runRobustnessCheck(): Promise<RobustnessReport> {
 
         results.push(result);
 
-        // Progress indicator
         const progress = ((combinationIndex / totalCombinations) * 100).toFixed(1);
         console.log(
           `[${combinationIndex}/${totalCombinations}] (${progress}%) ` +
@@ -204,10 +198,8 @@ export async function runRobustnessCheck(): Promise<RobustnessReport> {
   console.log("-".repeat(80));
   console.log();
 
-  // Sort results by Profit Factor (descending)
   const sortedResults = [...results].sort((a, b) => b.profitFactor - a.profitFactor);
 
-  // Calculate profit lock group statistics
   const profitLockStats: ProfitLockGroupStats[] = [];
   for (const profitLockR of profitLockRValues) {
     const groupResults = results.filter(r => r.profitLockR === profitLockR);
@@ -227,14 +219,12 @@ export async function runRobustnessCheck(): Promise<RobustnessReport> {
     });
   }
 
-  // Detect anomalies
-  const anomalies: RobustnessResult[] = results.filter(r => 
+  const anomalies: RobustnessResult[] = results.filter(r =>
     r.profitFactor < 1.5 ||
     r.maxDrawdownPct > 6 ||
     r.avgWin < r.avgLoss * 1.5
   );
 
-  // Generate conclusion
   const avgPF = results.reduce((sum, r) => sum + r.profitFactor, 0) / results.length;
   const minPF = Math.min(...results.map(r => r.profitFactor));
   const maxPF = Math.max(...results.map(r => r.profitFactor));
@@ -244,7 +234,7 @@ export async function runRobustnessCheck(): Promise<RobustnessReport> {
   let conclusion = `在 ${results.length} 组参数组合中，`;
   conclusion += `Profit Factor 平均值为 ${avgPF.toFixed(2)}，范围在 ${minPF.toFixed(2)} ~ ${maxPF.toFixed(2)}。`;
   conclusion += `最大回撤平均值为 ${avgDD.toFixed(2)}%，最大值为 ${maxDD.toFixed(2)}%。`;
-  
+
   if (anomalies.length > 0) {
     conclusion += `检测到 ${anomalies.length} 组异常组合（PF < 1.5 或 DD > 6% 或 AvgWin < AvgLoss × 1.5）。`;
   } else {
@@ -268,7 +258,6 @@ export function displayRobustnessReport(report: RobustnessReport) {
   console.log("=".repeat(80));
   console.log();
 
-  // 1. Full results table (sorted by PF)
   console.log("1️⃣ Complete Results Table (Sorted by Profit Factor)");
   console.log("-".repeat(80));
   console.log(
@@ -308,7 +297,6 @@ export function displayRobustnessReport(report: RobustnessReport) {
   console.log("-".repeat(80));
   console.log();
 
-  // 2. Profit Lock group statistics
   console.log("2️⃣ Profit Lock Group Statistics");
   console.log("-".repeat(80));
   console.log(
@@ -336,26 +324,25 @@ export function displayRobustnessReport(report: RobustnessReport) {
   console.log("-".repeat(80));
   console.log();
 
-  // 3. Anomalies
   if (report.anomalies.length > 0) {
     console.log("3️⃣ ⚠️  Anomaly Detection");
     console.log("-".repeat(80));
     console.log(`Found ${report.anomalies.length} anomaly combinations:`);
     console.log();
-    
+
     report.anomalies.forEach((r, index) => {
       const issues: string[] = [];
       if (r.profitFactor < 1.5) issues.push(`PF < 1.5 (${r.profitFactor.toFixed(2)})`);
       if (r.maxDrawdownPct > 6) issues.push(`DD > 6% (${r.maxDrawdownPct.toFixed(2)}%)`);
       if (r.avgWin < r.avgLoss * 1.5) issues.push(`AvgWin < AvgLoss × 1.5 (${r.avgWin.toFixed(2)} < ${(r.avgLoss * 1.5).toFixed(2)})`);
-      
+
       const lockStr = r.profitLockR === "off" ? "off" : r.profitLockR.toString();
       console.log(
         `${index + 1}. ADX=${r.trendExhaustADX}, Bars=${r.trendExhaustBars}, Lock=${lockStr} | ` +
         `Issues: ${issues.join(", ")}`
       );
     });
-    
+
     console.log("-".repeat(80));
     console.log();
   } else {
@@ -365,7 +352,6 @@ export function displayRobustnessReport(report: RobustnessReport) {
     console.log();
   }
 
-  // 4. Conclusion
   console.log("4️⃣ Conclusion");
   console.log("-".repeat(80));
   console.log(report.conclusion);

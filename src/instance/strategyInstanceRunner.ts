@@ -39,16 +39,16 @@ export class StrategyInstanceRunner {
         config
       );
       
-      // Update trailing stop
-      if (riskResult.trailingUpdate.shouldUpdate) {
+      // Update stop loss (all stages)
+      if (riskResult.stopLossUpdate) {
         positionStore.dispatch({
           type: 'UPDATE_STOP',
           payload: {
-            stopLoss: riskResult.trailingUpdate.stopLoss,
-            trailingStop: riskResult.trailingUpdate.trailingStop,
-            isTrailingActive: riskResult.trailingUpdate.isTrailingActive,
-            maxUnrealizedR: riskResult.trailingUpdate.maxUnrealizedR,
-            trailingMode: riskResult.trailingUpdate.trailingMode,
+            stopLoss: riskResult.stopLossUpdate.stopLoss,
+            trailingStop: riskResult.stopLossUpdate.trailingStop,
+            isTrailingActive: riskResult.stopLossUpdate.isTrailingActive,
+            maxUnrealizedR: riskResult.stopLossUpdate.maxUnrealizedR,
+            trailingMode: riskResult.stopLossUpdate.trailingMode,
           },
           reason: 'TRAILING_STOP' as TradeReason,
         });

@@ -28,7 +28,7 @@ export class PaperEngine implements IEngine {
     const entrySlippageRate = calculateDynamicSlippageRate(
       bar,
       ltfIndicator.atr,
-      config.backtest.slippageRate
+      config.execution.slippageRate
     );
     
     // Apply slippage to entry price (for LONG: buy at higher price)
@@ -80,13 +80,13 @@ export class PaperEngine implements IEngine {
     // Calculate commission
     const entryValue = position.entryPrice * position.size;
     const exitValue = bar.close * position.size;
-    const commission = (entryValue + exitValue) * config.backtest.commissionRate;
+    const commission = (entryValue + exitValue) * config.execution.commissionRate;
     
     // Calculate dynamic slippage for exit based on ATR
     const exitSlippageRate = calculateDynamicSlippageRate(
       bar,
       ltfIndicator?.atr,
-      config.backtest.slippageRate
+      config.execution.slippageRate
     );
     
     // Apply slippage to exit price

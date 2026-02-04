@@ -1,18 +1,18 @@
 /**
  * Legacy BacktestEngine for robustness check
- * 
+ *
  * NOTE: This is the OLD single-instance BacktestEngine, kept for robustness check tool.
  * The NEW architecture uses engine/backtestEngine.ts which implements IEngine interface.
- * 
+ *
  * Do NOT use this in new code. Use engine/backtestEngine.ts instead.
  */
 
-import { Config } from '../config/config';
-import { Kline, StrategySignal, TradeReason, BacktestResult, HTFIndicatorData, LTFIndicatorData } from '../types';
-import { trendStrategy } from '../core/strategy/trendStrategy';
-import { riskManager, calculatePositionSize } from '../core/risk/riskManager';
-import { PositionStore } from '../core/state/positionStore';
-import { TradeLogger } from '../core/logger/tradeLogger';
+import { Config } from "../../config/config";
+import { Kline, StrategySignal, TradeReason, BacktestResult, HTFIndicatorData, LTFIndicatorData } from "../../types";
+import { trendStrategy } from "../../core/strategy/trendStrategy";
+import { riskManager, calculatePositionSize } from "../../core/risk/riskManager";
+import { PositionStore } from "../../core/state/positionStore";
+import { TradeLogger } from "../../core/logger/tradeLogger";
 
 interface BacktestContext {
   bar: Kline;
@@ -31,7 +31,7 @@ export class BacktestEngine {
     this.config = config;
     this.positionStore = new PositionStore();
     this.logger = new TradeLogger();
-    this.logger.setInitialCapital(config.backtest.initialCapital);
+    this.logger.setInitialCapital(config.account.initialCapital);
     this.logger.setSilent(silent);
   }
 
@@ -41,7 +41,7 @@ export class BacktestEngine {
     ltfIndicators: LTFIndicatorData[]
   ): BacktestResult {
     this.klines = signalKlines;
-    
+
     for (let i = 0; i < signalKlines.length; i++) {
       const context: BacktestContext = {
         bar: signalKlines[i],
@@ -64,7 +64,6 @@ export class BacktestEngine {
      * 1️⃣ Risk Management（优先检查止损 + Trailing Stop）
      * ========================= */
     if (position && positionState === "OPEN") {
-      // Use LTFIndicatorData directly for RiskManager (v3)
       const riskResult = riskManager(
         position,
         {
@@ -76,22 +75,20 @@ export class BacktestEngine {
         this.config
       );
 
-      // Handle trailing stop updates (v5: includes break-even stopLoss updates + profit lock)
-      if (riskResult.trailingUpdate.shouldUpdate) {
+      if (riskResult.stopLossUpdate) {
         this.positionStore.dispatch({
           type: 'UPDATE_STOP',
           payload: {
-            stopLoss: riskResult.trailingUpdate.stopLoss,
-            trailingStop: riskResult.trailingUpdate.trailingStop,
-            isTrailingActive: riskResult.trailingUpdate.isTrailingActive,
-            maxUnrealizedR: riskResult.trailingUpdate.maxUnrealizedR,
-            trailingMode: riskResult.trailingUpdate.trailingMode, // v5: Trailing stop mode
+            stopLoss: riskResult.stopLossUpdate.stopLoss,
+            trailingStop: riskResult.stopLossUpdate.trailingStop,
+            isTrailingActive: riskResult.stopLossUpdate.isTrailingActive,
+            maxUnrealizedR: riskResult.stopLossUpdate.maxUnrealizedR,
+            trailingMode: riskResult.stopLossUpdate.trailingMode,
           },
           reason: 'TRAILING_STOP' as TradeReason,
         });
       }
 
-      // Check if stop loss is triggered
       if (riskResult.decision.action === 'EXIT') {
         this.executeExit(bar, riskResult.decision.reason || 'STOP_LOSS');
         return;
@@ -108,37 +105,27 @@ export class BacktestEngine {
       positionState,
     });
 
-    // Handle Strategy EXIT signal
     if (signal.type === "EXIT" && position && positionState === "OPEN") {
       this.executeExit(bar, signal.reason as TradeReason || 'TREND_INVALIDATED');
       return;
     }
 
-    // Handle Strategy ENTRY signal
     if (signal.type === "ENTRY" && positionState === "FLAT") {
       this.executeEntry(bar, signal, ltfIndicator);
       return;
     }
-
-    // HOLD: do nothing
   }
-
-  /* =========================
-   * 3️⃣ Execution
-   * ========================= */
 
   private executeEntry(bar: Kline, signal: StrategySignal, ltfIndicator: LTFIndicatorData) {
     if (!signal.side || signal.side !== "LONG") {
-      return; // MVP: only LONG
+      return;
     }
-    
 
     const entryPrice = bar.close;
     const equity = this.logger.getCurrentEquity();
     const riskPerTrade = this.config.risk.maxRiskPerTrade;
     const stopLossPercent = this.config.risk.initialStopPct;
 
-    // Calculate position size and stop loss using RiskManager (v4: initial stop loss)
     const { size, stopLoss } = calculatePositionSize(
       entryPrice,
       equity,
@@ -158,11 +145,10 @@ export class BacktestEngine {
       reason: (signal.reason as TradeReason) || 'HTF_BULL_TREND_CONFIRMED',
     });
 
-    // Log entry
     const tradeAction = {
       action: 'ENTER' as const,
       side: signal.side,
-      atr: ltfIndicator.atr || 0, // ATR for logging only
+      atr: ltfIndicator.atr || 0,
       reason: (signal.reason as TradeReason) || 'HTF_BULL_TREND_CONFIRMED',
     };
     this.logger.logEntry(bar, tradeAction);
@@ -172,34 +158,29 @@ export class BacktestEngine {
     const position = this.positionStore.get();
     if (!position) return;
 
-    // Calculate commission and slippage
     const entryValue = position.entryPrice * position.size;
     const exitValue = bar.close * position.size;
-    const commission = (entryValue + exitValue) * this.config.backtest.commissionRate;
+    const commission = (entryValue + exitValue) * this.config.execution.commissionRate;
     
-    // Apply slippage (simplified: assume slippage on exit only)
-    const slippageMultiplier = position.side === "LONG" 
-      ? 1 - this.config.backtest.slippageRate 
-      : 1 + this.config.backtest.slippageRate;
+    const slippageMultiplier = position.side === "LONG"
+      ? 1 - this.config.execution.slippageRate
+      : 1 + this.config.execution.slippageRate;
     const exitPriceWithSlippage = bar.close * slippageMultiplier;
     const slippage = Math.abs(exitPriceWithSlippage - bar.close) * position.size;
 
-    // Start closing process
     this.positionStore.dispatch({
       type: 'START_CLOSING',
     });
 
-    // Close position
     this.positionStore.dispatch({
       type: 'CLOSE_POSITION',
       payload: {
-        exitPrice: exitPriceWithSlippage, // Use price with slippage
+        exitPrice: exitPriceWithSlippage,
         exitTime: bar.closeTime,
       },
       reason: (reason as TradeReason) || 'MANUAL_EXIT',
     });
 
-    // Create a temporary position with exit price for logging
     const positionForLogging = { ...position };
     this.logger.logExit(bar, positionForLogging, (reason as TradeReason) || 'MANUAL_EXIT', {
       commission,

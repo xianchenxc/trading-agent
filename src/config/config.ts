@@ -1,15 +1,14 @@
 /**
  * Configuration file for trading agent
- * All key parameters are centralized here
+ * Instance-specific configuration (strategy + runtime)
+ * Global infrastructure config is in globalConfig.ts
  */
 
-export interface Config {
-  // Exchange settings
-  exchange: {
-    baseUrl: string;
-    symbol: string; // e.g., "BTCUSDT"
-  };
-
+/**
+ * Strategy configuration (per-instance)
+ * Parameters that define trading strategy behavior
+ */
+export interface StrategyConfig {
   // Timeframe definition
   timeframe: {
     trend: string;  // e.g. "4h"  -> market regime / trend
@@ -47,35 +46,43 @@ export interface Config {
     trendExhaustBars?: number;    // e.g. 3 (number of consecutive declining bars)
     profitLockR?: number;         // e.g. 4.0 (switch to EMA50 trailing at +4R, optional)
   };
+}
 
-  // Backtest settings
-  backtest: {
-    initialCapital: number;
-    commissionRate: number; // e.g. 0.001 (0.1%)
-    slippageRate: number;   // e.g. 0.0005 (0.05%)
+/**
+ * Runtime configuration (per-instance)
+ * Parameters for execution and account management
+ */
+export interface RuntimeConfig {
+  // Account configuration (all modes)
+  account: {
+    initialCapital: number;  // Initial capital for backtest/paper/live (used for relative return calculation)
+  };
+
+  // Execution configuration (backtest/paper/live)
+  execution: {
+    commissionRate: number;  // Commission rate (fixed for all modes, e.g. 0.001 = 0.1%)
+    slippageRate: number;   // Slippage rate (only used in backtest/paper, live uses real execution price)
+  };
+
+  // Backtest-specific settings (optional, only needed for backtest mode)
+  backtest?: {
     startDate: string;      // Start date for backtest (ISO date string, e.g. "2024-01-01")
     endDate: string;        // End date for backtest (ISO date string, e.g. "2024-12-31")
   };
-
-  // Data cache settings
-  cache: {
-    enabled: boolean;        // Enable/disable cache
-    directory: string;       // Cache directory path
-  };
 }
 
-export const defaultConfig: Config = {
-  exchange: {
-    baseUrl: "https://api.binance.com",
-    symbol: "BTCUSDT",
-  },
+/**
+ * Complete instance configuration
+ * Combines strategy and runtime configuration
+ */
+export interface Config extends StrategyConfig, RuntimeConfig {}
 
+export const defaultConfig: Config = {
   timeframe: {
     trend: "4h",
     signal: "1h",
   },
 
-  
   indicators: {
     ema: {
       short: 20,
@@ -105,16 +112,17 @@ export const defaultConfig: Config = {
     profitLockR: 4.0, // Switch to EMA50 trailing at +4R (optional, can be undefined to disable)
   },
 
-  backtest: {
-    initialCapital: 10_000,
-    commissionRate: 0.001, // 0.1%
-    slippageRate: 0.0005,  // 0.05%
-    startDate: "2025-01-01", // Start date (ISO date string)
-    endDate: "2026-01-01",   // End date (ISO date string)
+  account: {
+    initialCapital: 10_000, // Initial capital for all modes
   },
 
-  cache: {
-    enabled: true,
-    directory: "data/cache",
+  execution: {
+    commissionRate: 0.001, // 0.1% (fixed for all modes)
+    slippageRate: 0.0005,  // 0.05% (only used in backtest/paper, live uses real execution price)
+  },
+
+  backtest: {
+    startDate: "2025-01-01", // Start date (ISO date string)
+    endDate: "2026-01-01",   // End date (ISO date string)
   },
 };

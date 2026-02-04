@@ -6,7 +6,7 @@ import { calculateADX } from "../indicators";
 import { Kline } from "../../types";
 
 describe("calculateADX", () => {
-  // Helper function to create a simple Kline
+  // ... rest identical, paths already correct (../indicators = data/indicators, ../../types = types)
   function createKline(
     openTime: number,
     open: number,
@@ -22,7 +22,7 @@ describe("calculateADX", () => {
       low,
       close,
       volume,
-      closeTime: openTime + 3600000, // 1 hour later
+      closeTime: openTime + 3600000,
     };
   }
 
@@ -32,9 +32,7 @@ describe("calculateADX", () => {
       for (let i = 0; i < 50; i++) {
         klines.push(createKline(i * 3600000, 100, 105, 95, 100 + i));
       }
-
       const result = calculateADX(klines, 14);
-      
       expect(result.adx).toHaveLength(50);
       expect(result.plusDI).toHaveLength(50);
       expect(result.minusDI).toHaveLength(50);
@@ -45,10 +43,7 @@ describe("calculateADX", () => {
       for (let i = 0; i < 30; i++) {
         klines.push(createKline(i * 3600000, 100, 105, 95, 100 + i));
       }
-
       const result = calculateADX(klines, 14);
-      
-      // First period values should be undefined
       for (let i = 0; i < 14; i++) {
         expect(result.plusDI[i]).toBeUndefined();
         expect(result.minusDI[i]).toBeUndefined();
@@ -61,10 +56,7 @@ describe("calculateADX", () => {
       for (let i = 0; i < 30; i++) {
         klines.push(createKline(i * 3600000, 100, 105, 95, 100 + i));
       }
-
       const result = calculateADX(klines, 14);
-      
-      // +DI and -DI should be defined from index 14
       expect(result.plusDI[14]).toBeDefined();
       expect(result.minusDI[14]).toBeDefined();
       expect(typeof result.plusDI[14]).toBe("number");
@@ -76,15 +68,10 @@ describe("calculateADX", () => {
       for (let i = 0; i < 50; i++) {
         klines.push(createKline(i * 3600000, 100, 105, 95, 100 + i));
       }
-
       const result = calculateADX(klines, 14);
-      
-      // ADX should be undefined before index 27 (14 * 2 - 1, strict Wilder definition)
       for (let i = 0; i < 27; i++) {
         expect(result.adx[i]).toBeUndefined();
       }
-      
-      // ADX should be defined from index 27 (period * 2 - 1)
       expect(result.adx[27]).toBeDefined();
       expect(typeof result.adx[27]).toBe("number");
     });
@@ -93,7 +80,6 @@ describe("calculateADX", () => {
   describe("Edge cases", () => {
     it("should handle empty array", () => {
       const result = calculateADX([], 14);
-      
       expect(result.adx).toHaveLength(0);
       expect(result.plusDI).toHaveLength(0);
       expect(result.minusDI).toHaveLength(0);
@@ -104,10 +90,7 @@ describe("calculateADX", () => {
       for (let i = 0; i < 10; i++) {
         klines.push(createKline(i * 3600000, 100, 105, 95, 100));
       }
-
       const result = calculateADX(klines, 14);
-      
-      // All values should be undefined
       for (let i = 0; i < 10; i++) {
         expect(result.adx[i]).toBeUndefined();
         expect(result.plusDI[i]).toBeUndefined();
@@ -120,38 +103,23 @@ describe("calculateADX", () => {
       for (let i = 0; i < 14; i++) {
         klines.push(createKline(i * 3600000, 100, 105, 95, 100 + i));
       }
-
       const result = calculateADX(klines, 14);
-      
-      // +DI and -DI should be defined at index 14 (but array only has 14 elements, so index 14 doesn't exist)
-      // Actually, since array length is 14, index 14 is out of bounds
-      expect(result.plusDI[13]).toBeUndefined(); // Last index is 13
+      expect(result.plusDI[13]).toBeUndefined();
     });
   });
 
   describe("Uptrend scenario", () => {
     it("should show higher +DI than -DI in uptrend", () => {
       const klines: Kline[] = [];
-      // Create an uptrend
       for (let i = 0; i < 50; i++) {
-        const basePrice = 100 + i * 2; // Increasing price
+        const basePrice = 100 + i * 2;
         klines.push(
-          createKline(
-            i * 3600000,
-            basePrice,
-            basePrice + 3,
-            basePrice - 2,
-            basePrice + 1
-          )
+          createKline(i * 3600000, basePrice, basePrice + 3, basePrice - 2, basePrice + 1)
         );
       }
-
       const result = calculateADX(klines, 14);
-      
-      // After enough periods, +DI should be higher than -DI
       const lastPlusDI = result.plusDI[result.plusDI.length - 1];
       const lastMinusDI = result.minusDI[result.minusDI.length - 1];
-      
       if (lastPlusDI !== undefined && lastMinusDI !== undefined) {
         expect(lastPlusDI).toBeGreaterThan(lastMinusDI);
       }
@@ -161,26 +129,15 @@ describe("calculateADX", () => {
   describe("Downtrend scenario", () => {
     it("should show higher -DI than +DI in downtrend", () => {
       const klines: Kline[] = [];
-      // Create a downtrend
       for (let i = 0; i < 50; i++) {
-        const basePrice = 100 - i * 2; // Decreasing price
+        const basePrice = 100 - i * 2;
         klines.push(
-          createKline(
-            i * 3600000,
-            basePrice,
-            basePrice + 2,
-            basePrice - 3,
-            basePrice - 1
-          )
+          createKline(i * 3600000, basePrice, basePrice + 2, basePrice - 3, basePrice - 1)
         );
       }
-
       const result = calculateADX(klines, 14);
-      
-      // After enough periods, -DI should be higher than +DI
       const lastPlusDI = result.plusDI[result.plusDI.length - 1];
       const lastMinusDI = result.minusDI[result.minusDI.length - 1];
-      
       if (lastPlusDI !== undefined && lastMinusDI !== undefined) {
         expect(lastMinusDI).toBeGreaterThan(lastPlusDI);
       }
@@ -193,10 +150,7 @@ describe("calculateADX", () => {
       for (let i = 0; i < 50; i++) {
         klines.push(createKline(i * 3600000, 100, 105, 95, 100 + Math.sin(i) * 5));
       }
-
       const result = calculateADX(klines, 14);
-      
-      // Check all defined ADX values are in valid range (excluding NaN)
       for (let i = 0; i < result.adx.length; i++) {
         if (result.adx[i] !== undefined && !isNaN(result.adx[i]!)) {
           expect(result.adx[i]).toBeGreaterThanOrEqual(0);
@@ -210,10 +164,7 @@ describe("calculateADX", () => {
       for (let i = 0; i < 50; i++) {
         klines.push(createKline(i * 3600000, 100, 105, 95, 100 + i));
       }
-
       const result = calculateADX(klines, 14);
-      
-      // Check all defined DI values are in valid range
       for (let i = 0; i < result.plusDI.length; i++) {
         if (result.plusDI[i] !== undefined) {
           expect(result.plusDI[i]).toBeGreaterThanOrEqual(0);
@@ -233,9 +184,7 @@ describe("calculateADX", () => {
       for (let i = 0; i < 30; i++) {
         klines.push(createKline(i * 3600000, 100, 105, 95, 100));
       }
-
       const result = calculateADX(klines, 14);
-      
       expect(result.adx.length).toBe(klines.length);
       expect(result.plusDI.length).toBe(klines.length);
       expect(result.minusDI.length).toBe(klines.length);
@@ -243,36 +192,22 @@ describe("calculateADX", () => {
 
     it("should handle different periods correctly", () => {
       const klines: Kline[] = [];
-      // Create clear trend to avoid NaN
       for (let i = 0; i < 50; i++) {
         const basePrice = 100 + i * 2;
         klines.push(
-          createKline(
-            i * 3600000,
-            basePrice,
-            basePrice + 3,
-            basePrice - 2,
-            basePrice + 1
-          )
+          createKline(i * 3600000, basePrice, basePrice + 3, basePrice - 2, basePrice + 1)
         );
       }
-
       const result14 = calculateADX(klines, 14);
       const result10 = calculateADX(klines, 10);
-      
-      // Both should have defined values
       expect(result14.adx[28]).toBeDefined();
       expect(result10.adx[20]).toBeDefined();
-      
-      // Different periods should produce valid numbers (may be same in extreme cases)
-      // The important thing is that both calculations work correctly
       if (
         result14.adx[28] !== undefined &&
         !isNaN(result14.adx[28]!) &&
         result10.adx[20] !== undefined &&
         !isNaN(result10.adx[20]!)
       ) {
-        // Both should be valid numbers in range [0, 100]
         expect(result14.adx[28]).toBeGreaterThanOrEqual(0);
         expect(result14.adx[28]).toBeLessThanOrEqual(100);
         expect(result10.adx[20]).toBeGreaterThanOrEqual(0);
@@ -283,14 +218,11 @@ describe("calculateADX", () => {
 
   describe("Real-world scenario", () => {
     it("should calculate ADX for realistic price data", () => {
-      // Simulate realistic BTC price movement
       const klines: Kline[] = [];
       let price = 50000;
-      
       for (let i = 0; i < 50; i++) {
-        const change = (Math.random() - 0.5) * 1000; // Random price change
+        const change = (Math.random() - 0.5) * 1000;
         price += change;
-        
         klines.push(
           createKline(
             i * 3600000,
@@ -302,10 +234,7 @@ describe("calculateADX", () => {
           )
         );
       }
-
       const result = calculateADX(klines, 14);
-      
-      // Should have valid ADX values after period * 2
       const lastAdx = result.adx[result.adx.length - 1];
       expect(lastAdx).toBeDefined();
       expect(typeof lastAdx).toBe("number");

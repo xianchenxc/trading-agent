@@ -190,6 +190,57 @@ export function trendStrategy({ bar, htfIndicator, ltfIndicator, positionState }
 
 ## 文档规范
 
-- 所有导出的函数/类必须有 JSDoc 注释
-- 复杂逻辑必须有行内注释说明
-- 架构决策记录在 `.cursor/plans/` 目录下
+### 注释要求
+
+- **所有导出的函数/类必须有 JSDoc 注释**
+  - 使用英文编写注释（符合 `user_rules` 要求）
+  - 包含函数/类的职责说明
+  - 包含参数说明（`@param`）
+  - 包含返回值说明（`@returns`）
+  - 包含示例（如适用）
+
+- **复杂逻辑必须有行内注释说明**
+  - 使用英文编写注释
+  - 解释"为什么"而非"是什么"（代码本身已经说明了是什么）
+  - 说明业务逻辑的关键决策点
+
+- **注释内容要求**
+  - ✅ **只保留反映当前逻辑的内容**：注释应描述代码当前的行为和逻辑
+  - ❌ **禁止包含版本历史**：不要在注释中标注版本号（如 "v5"、"v4"、"MVP v5" 等）
+  - ❌ **禁止包含变更历史**：不要在注释中描述功能演进过程（如 "v4 fallback"、"v5: 新增功能" 等）
+  - ❌ **禁止包含过时信息**：删除已废弃功能的注释，避免误导
+
+**示例**:
+
+```typescript
+// ❌ 错误：包含版本历史
+/**
+ * Risk Manager (MVP v5: Trend Exhaustion Filter + Profit Lock)
+ * - v5: Trend exhaustion filter - only allow EXIT in stage 3 when trend is exhausted
+ * - v5: Profit lock mode - switch to EMA50 trailing when unrealizedR ≥ profitLockR
+ */
+export function riskManager(...) { }
+
+// ✅ 正确：只描述当前逻辑
+/**
+ * Risk Manager
+ * 
+ * Responsibilities:
+ * - Calculate position size based on risk per trade (1% of equity)
+ * - Manage Delayed Trailing Stop mechanism with three stages
+ * - Trend exhaustion filter - only allow EXIT in stage 3 when trend is exhausted
+ * - Profit lock mode - switch to EMA50 trailing when unrealizedR ≥ profitLockR
+ */
+export function riskManager(...) { }
+```
+
+```typescript
+// ❌ 错误：包含变更历史
+// v5: Check for profit lock mode switch
+let trailingMode = position.trailingMode || "EMA20";
+
+// ✅ 正确：只描述当前逻辑
+// Check for profit lock mode switch
+let trailingMode = position.trailingMode || "EMA20";
+```
+

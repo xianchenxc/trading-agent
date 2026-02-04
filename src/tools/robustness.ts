@@ -2,7 +2,7 @@
  * Entry point for robustness check
  */
 
-import { runRobustnessCheck, displayRobustnessReport } from './backtest/robustnessCheck';
+import { runRobustnessCheck, displayRobustnessReport } from "./backtest/robustnessCheck";
 
 async function main() {
   try {

@@ -4,9 +4,11 @@
  */
 
 import { DataFetcher } from '../data/fetcher';
-import { StrategyInstance } from '../instance/strategyInstance';
+import { Config } from '../config/config';
 import { Kline, HTFIndicatorData, LTFIndicatorData } from '../types';
 import { getIntervalMs } from '../utils/timeUtils';
+import { findHTFIndicatorForLTFBar } from './timeAlignmentService';
+import { globalConfig } from '../config/globalConfig';
 
 export interface InstanceData {
   ltfKlines: Kline[];
@@ -26,13 +28,18 @@ export interface InstanceHistoricalData {
  * Fetch and prepare data for backtest mode
  */
 export async function prepareBacktestData(
-  instance: StrategyInstance
+  instanceId: string,
+  symbol: string,
+  config: Config
 ): Promise<InstanceHistoricalData> {
-  const config = instance.config;
+  if (!config.backtest) {
+    throw new Error(`[${instanceId}] backtest config is required for backtest mode`);
+  }
+
   const fetcher = new DataFetcher(
-    config.exchange.baseUrl,
-    config.cache.enabled,
-    config.cache.directory
+    globalConfig.exchange.baseUrl,
+    globalConfig.cache.enabled,
+    globalConfig.cache.directory
   );
 
   // Parse dates
@@ -62,25 +69,25 @@ export async function prepareBacktestData(
   const htfStartTime = Math.max(0, startTime - htfPeriodMs);
 
   const htfKlines = await fetcher.fetchKlinesForBacktest(
-    config.exchange.symbol,
+    symbol,
     config.timeframe.trend,
     htfStartTime,
     endTime
   );
 
   const ltfKlines = await fetcher.fetchKlinesForBacktest(
-    config.exchange.symbol,
+    symbol,
     config.timeframe.signal,
     startTime,
     endTime
   );
 
   if (htfKlines.length === 0 || ltfKlines.length === 0) {
-    throw new Error(`[${instance.instanceId}] No historical data fetched`);
+    throw new Error(`[${instanceId}] No historical data fetched`);
   }
 
   // Calculate indicators
-  const { buildHTFIndicators, buildLTFIndicators } = await import('../indicators/indicators');
+  const { buildHTFIndicators, buildLTFIndicators } = await import('../data/indicators');
   const htfIndicators = buildHTFIndicators(htfKlines, config.indicators);
   const ltfIndicators = buildLTFIndicators(ltfKlines, config.indicators, config.strategy.lookbackPeriod);
 
@@ -96,35 +103,36 @@ export async function prepareBacktestData(
  * Fetch initial historical data for paper trading mode
  */
 export async function preparePaperTradingData(
-  instance: StrategyInstance
+  instanceId: string,
+  symbol: string,
+  config: Config
 ): Promise<InstanceData> {
-  const config = instance.config;
   const fetcher = new DataFetcher(
-    config.exchange.baseUrl,
-    config.cache.enabled,
-    config.cache.directory
+    globalConfig.exchange.baseUrl,
+    globalConfig.cache.enabled,
+    globalConfig.cache.directory
   );
 
   // Fetch HTF klines (need enough history for indicators, e.g., 200 bars)
   const htfKlines = await fetcher.fetchKlines(
-    config.exchange.symbol,
+    symbol,
     config.timeframe.trend,
     200
   );
 
   // Fetch LTF klines
   const ltfKlines = await fetcher.fetchKlines(
-    config.exchange.symbol,
+    symbol,
     config.timeframe.signal,
     200
   );
 
   if (htfKlines.length === 0 || ltfKlines.length === 0) {
-    throw new Error(`[${instance.instanceId}] No historical data fetched`);
+    throw new Error(`[${instanceId}] No historical data fetched`);
   }
 
   // Calculate indicators
-  const { buildHTFIndicators, buildLTFIndicators } = await import('../indicators/indicators');
+  const { buildHTFIndicators, buildLTFIndicators } = await import('../data/indicators');
   const htfIndicators = buildHTFIndicators(htfKlines, config.indicators);
   const ltfIndicators = buildLTFIndicators(ltfKlines, config.indicators, config.strategy.lookbackPeriod);
 
@@ -134,4 +142,70 @@ export async function preparePaperTradingData(
     htfIndicators,
     ltfIndicators,
   };
+}
+
+/**
+ * Mutable state for paper trading: kline buffers and last bar times per instance.
+ * Updated in place by checkNewBarAndPrepareBarData when a new bar is found.
+ */
+export interface PaperTradingInstanceState {
+  fetcher: DataFetcher;
+  htfKlines: Kline[];
+  ltfKlines: Kline[];
+  lastLtfBarTime: number;
+  lastHtfBarTime: number;
+}
+
+const PAPER_MAX_KLINES = 200;
+const PAPER_FETCH_TAIL = 5;
+
+/**
+ * Check for a new LTF bar; if found, update state and return bar + indicators for execution.
+ * Performs data fetch, indicator calculation, and HTF alignment in one place so index stays orchestration-only.
+ * @returns Bar data for onBar, or null if no new bar
+ */
+export async function checkNewBarAndPrepareBarData(
+  instanceId: string,
+  symbol: string,
+  config: Config,
+  state: PaperTradingInstanceState
+): Promise<{ bar: Kline; htfIndicator: HTFIndicatorData; ltfIndicator: LTFIndicatorData } | null> {
+  const latestLtfKlines = await state.fetcher.fetchKlines(
+    symbol,
+    config.timeframe.signal,
+    PAPER_FETCH_TAIL
+  );
+  if (latestLtfKlines.length === 0) return null;
+
+  const latestLtfBar = latestLtfKlines[latestLtfKlines.length - 1];
+  if (latestLtfBar.openTime <= state.lastLtfBarTime) return null;
+
+  // Update LTF state
+  state.ltfKlines.push(latestLtfBar);
+  if (state.ltfKlines.length > PAPER_MAX_KLINES) state.ltfKlines.shift();
+  state.lastLtfBarTime = latestLtfBar.openTime;
+
+  // Fetch and update HTF if new bar exists
+  const latestHtfKlines = await state.fetcher.fetchKlines(
+    symbol,
+    config.timeframe.trend,
+    PAPER_FETCH_TAIL
+  );
+  if (latestHtfKlines.length > 0) {
+    const latestHtfBar = latestHtfKlines[latestHtfKlines.length - 1];
+    if (latestHtfBar.openTime > state.lastHtfBarTime) {
+      state.htfKlines.push(latestHtfBar);
+      if (state.htfKlines.length > PAPER_MAX_KLINES) state.htfKlines.shift();
+      state.lastHtfBarTime = latestHtfBar.openTime;
+    }
+  }
+
+  const { buildHTFIndicators, buildLTFIndicators } = await import('../data/indicators');
+  const htfIndicators = buildHTFIndicators(state.htfKlines, config.indicators);
+  const ltfIndicators = buildLTFIndicators(state.ltfKlines, config.indicators, config.strategy.lookbackPeriod);
+
+  const htfIndicator = findHTFIndicatorForLTFBar(latestLtfBar, state.htfKlines, htfIndicators);
+  const ltfIndicator = ltfIndicators[ltfIndicators.length - 1];
+
+  return { bar: latestLtfBar, htfIndicator, ltfIndicator };
 }

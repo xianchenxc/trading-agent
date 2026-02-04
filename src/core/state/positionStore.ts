@@ -19,7 +19,7 @@ type PositionAction =
         trailingStop?: number;
         isTrailingActive?: boolean;
         maxUnrealizedR?: number;
-        trailingMode?: "EMA20" | "EMA50"; // v5: Trailing stop mode
+        trailingMode?: "EMA20" | "EMA50"; // Trailing stop mode
       };
       reason: TradeReason;
     }
@@ -68,15 +68,15 @@ export class PositionStore {
 
         this.position = {
           side: action.payload.side,
+          entryTime: action.payload.entryTime,
           entryPrice: action.payload.entryPrice,
+          size: action.payload.size,
+          reason: action.reason,
           initialStopLoss: action.payload.stopLoss, // Store initial stop loss
           stopLoss: action.payload.stopLoss, // Current stop loss (initially = initialStopLoss)
           trailingStop: undefined,
-          size: action.payload.size,
-          entryTime: action.payload.entryTime,
           isTrailingActive: false,
           maxUnrealizedR: 0,
-          reason: action.reason,
         };
         this.state = "OPEN";
         break;
@@ -102,7 +102,7 @@ export class PositionStore {
           this.position.maxUnrealizedR = action.payload.maxUnrealizedR;
         }
 
-        // v5: Update trailing mode
+        // Update trailing mode
         if (action.payload.trailingMode !== undefined) {
           this.position.trailingMode = action.payload.trailingMode;
         }
