@@ -39,7 +39,7 @@ export const instanceConfigs: InstanceConfigRegistry = {
       execution: { commissionRate: 0.001, slippageRate: 0.0005 },
       backtest: { 
         startDate: "2025-01-01", 
-        endDate: "2026-01-01" 
+        endDate: "2026-02-08" 
       },
     },
   },

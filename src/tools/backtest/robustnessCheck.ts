@@ -15,6 +15,7 @@ import { BacktestEngine } from "./backtestEngine";
 import { defaultConfig, Config } from "../../config/config";
 import { globalConfig } from "../../config/globalConfig";
 import { HTFIndicatorData, BacktestResult } from "../../types";
+import { buildHTFIndicators, buildLTFIndicators } from "../../data/indicatorBuilders";
 
 export interface RobustnessResult {
   trendExhaustADX: number;
@@ -104,9 +105,12 @@ export async function runRobustnessCheck(): Promise<RobustnessReport> {
   console.log();
 
   console.log("📈 Calculating indicators...");
-  const { buildHTFIndicators, buildLTFIndicators } = await import("../../data/indicators");
   const htfIndicators = buildHTFIndicators(htfKlines, baseConfig.indicators);
-  const ltfIndicators = buildLTFIndicators(ltfKlines, baseConfig.indicators, baseConfig.strategy.lookbackPeriod);
+  const ltfIndicators = buildLTFIndicators(
+    ltfKlines,
+    baseConfig.indicators,
+    baseConfig.strategy.lookbackPeriod
+  );
 
   const mappedHTFIndicators: HTFIndicatorData[] = [];
   for (const ltfBar of ltfKlines) {

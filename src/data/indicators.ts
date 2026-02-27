@@ -1,28 +1,42 @@
 /**
  * Technical indicators calculation
- * EMA, ATR, and ADX implementations
+ *
+ * This module serves as a small, reusable indicator library:
+ * - Low-level numeric APIs (`ema`, `atr`, `adx`) return full-length series with NaN for warm-up periods.
+ * - It is intentionally decoupled from Config and project-specific data structures.
  */
 
-import { Config } from "../config/config";
-import { Kline, IndicatorData, HTFIndicatorData, LTFIndicatorData } from "../types";
+import { Kline } from "../types";
 
 /**
-* Exponential Moving Average
-*/
-function calculateEMA(values: number[], period: number): Array<number | undefined> {
+ * Average True Range (Wilder's smoothing, internal implementation).
+ */
+
+// NOTE:
+// ADX first valid value at index = period * 2 - 1 (strict Wilder definition)
+// Do NOT align with TradingView UI offset
+
+/**
+ * Exponential Moving Average (EMA) series.
+ * Uses NaN for warm-up period where the EMA is not yet defined.
+ * @param values Input price or value series
+ * @param period Lookback period
+ * @returns EMA series as number[] with NaN for undefined entries
+ */
+export function ema(values: number[], period: number): number[] {
   const k = 2 / (period + 1);
-  const ema: Array<number | undefined> = [];
-  
+  const emaSeries: number[] = [];
+
   let prevEma: number | undefined;
-  
+
   for (let i = 0; i < values.length; i++) {
     const price = values[i];
-    
+
     if (i < period - 1) {
-      ema.push(undefined);
+      emaSeries.push(Number.NaN);
       continue;
     }
-    
+
     if (prevEma === undefined) {
       const slice = values.slice(i - period + 1, i + 1);
       const sma = slice.reduce((a, b) => a + b, 0) / period;
@@ -30,75 +44,75 @@ function calculateEMA(values: number[], period: number): Array<number | undefine
     } else {
       prevEma = price * k + prevEma * (1 - k);
     }
-  
-    ema.push(prevEma);
+
+    emaSeries.push(prevEma);
   }
-  
-  return ema;
+
+  return emaSeries;
 }
 
 /**
-* Average True Range (Wilder's smoothing)
-*/
-function calculateATR(klines: Kline[], period: number): Array<number | undefined> {
+ * Average True Range (ATR) series using Wilder's smoothing.
+ * Uses NaN for warm-up period where ATR is not yet defined.
+ * @param klines OHLCV series
+ * @param period Lookback period
+ * @returns ATR series as number[] with NaN for undefined entries
+ */
+export function atr(klines: Kline[], period: number): number[] {
   const trList: number[] = [];
-  const atr: Array<number | undefined> = [];
-  
+  const atrSeries: number[] = [];
+
   for (let i = 0; i < klines.length; i++) {
     if (i === 0) {
       trList.push(klines[i].high - klines[i].low);
-      atr.push(undefined);
+      atrSeries.push(Number.NaN);
       continue;
     }
-    
+
     const high = klines[i].high;
     const low = klines[i].low;
     const prevClose = klines[i - 1].close;
-    
+
     const tr = Math.max(
       high - low,
       Math.abs(high - prevClose),
       Math.abs(low - prevClose)
     );
-    
+
     trList.push(tr);
-    
+
     if (i < period) {
-      atr.push(undefined);
+      atrSeries.push(Number.NaN);
       continue;
     }
-    
-    
+
     if (i === period) {
       const firstAtr = trList.slice(1, period + 1).reduce((a, b) => a + b, 0) / period;
-      atr.push(firstAtr);
+      atrSeries.push(firstAtr);
     } else {
-      const prevAtr = atr[i - 1]!;
+      const prevAtr = atrSeries[i - 1]!;
       const currentAtr = (prevAtr * (period - 1) + tr) / period;
-      atr.push(currentAtr);
+      atrSeries.push(currentAtr);
     }
   }
-  
-  return atr;
+
+  return atrSeries;
 }
 
-// NOTE:
-// ADX first valid value at index = period * 2 - 1 (strict Wilder definition)
-// Do NOT align with TradingView UI offset
-
 /**
- * ADX + DI (Wilder's smoothing)
- * - Strict Wilder definition
- * - Deterministic & backtest-safe
- * - No future data usage
+ * ADX and DI series (Wilder's definition) as generic numeric series.
+ * Uses NaN for warm-up region (before DI/ADX are statistically defined).
+ * @param klines OHLCV series
+ * @param period Lookback period
+ * @returns ADX, +DI, -DI numeric series with NaN for undefined entries
  */
-export function calculateADX(
+export function adx(
   klines: Kline[],
   period: number
 ): {
-  adx: Array<number | undefined>;
-  plusDI: Array<number | undefined>;
-  minusDI: Array<number | undefined>;
+  adx: number[];
+  plusDI: number[];
+  minusDI: number[];
 } {
   const len = klines.length;
 
@@ -125,9 +139,9 @@ export function calculateADX(
   }
 
   // 2️⃣ Wilder smoothing for TR and DM
-  const smoothedTR: Array<number | undefined> = new Array(len).fill(undefined);
-  const smoothedPlusDM: Array<number | undefined> = new Array(len).fill(undefined);
-  const smoothedMinusDM: Array<number | undefined> = new Array(len).fill(undefined);
+  const smoothedTR: number[] = new Array(len).fill(Number.NaN);
+  const smoothedPlusDM: number[] = new Array(len).fill(Number.NaN);
+  const smoothedMinusDM: number[] = new Array(len).fill(Number.NaN);
 
   let trSum = 0;
   let plusDMSum = 0;
@@ -152,9 +166,9 @@ export function calculateADX(
   }
 
   // 3️⃣ +DI, -DI, DX
-  const plusDI: Array<number | undefined> = new Array(len).fill(undefined);
-  const minusDI: Array<number | undefined> = new Array(len).fill(undefined);
-  const dx: Array<number | undefined> = new Array(len).fill(undefined);
+  const plusDI: number[] = new Array(len).fill(Number.NaN);
+  const minusDI: number[] = new Array(len).fill(Number.NaN);
+  const dx: number[] = new Array(len).fill(Number.NaN);
 
   for (let i = period; i < len; i++) {
     const tr = smoothedTR[i]!;
@@ -176,7 +190,7 @@ export function calculateADX(
   }
 
   // 4️⃣ ADX
-  const adx: Array<number | undefined> = new Array(len).fill(undefined);
+  const adxSeries: number[] = new Array(len).fill(Number.NaN);
   const firstAdxIndex = period * 2 - 1;
 
   if (len > firstAdxIndex) {
@@ -184,146 +198,12 @@ export function calculateADX(
     for (let i = period; i <= firstAdxIndex; i++) {
       dxSum += dx[i]!;
     }
-    adx[firstAdxIndex] = dxSum / period;
+    adxSeries[firstAdxIndex] = dxSum / period;
 
     for (let i = firstAdxIndex + 1; i < len; i++) {
-      adx[i] = (adx[i - 1]! * (period - 1) + dx[i]!) / period;
+      adxSeries[i] = (adxSeries[i - 1]! * (period - 1) + dx[i]!) / period;
     }
   }
 
-  return { adx, plusDI, minusDI };
-}
-
-
-/**
- * Main indicator builder (backward compatibility)
- */
-export function buildIndicators(klines: Kline[], config: Config['indicators']): IndicatorData[] {
-  const closes = klines.map(k => k.close);
-
-  const ema20 = calculateEMA(closes, config.ema.short);
-  const ema50 = calculateEMA(closes, config.ema.medium);
-  const ema200 = calculateEMA(closes, config.ema.long);
-
-  const atr = calculateATR(klines, config.atr.period);
-  const { adx, plusDI, minusDI } = calculateADX(klines, config.adx.period);
-
-  return klines.map((k, i) => ({
-    emaShort: ema20[i],
-    emaMedium: ema50[i],
-    emaLong: ema200[i],
-
-    atr: atr[i],
-
-    adx: adx[i],
-    plusDI: plusDI[i],
-    minusDI: minusDI[i],
-  }));
-}
-
-/**
- * Build Higher Timeframe (HTF) indicators (4h)
- * Returns: EMA(medium), EMA(long), ADX(period from config)
- */
-export function buildHTFIndicators(klines: Kline[], config: Config['indicators']): HTFIndicatorData[] {
-  const closes = klines.map(k => k.close);
-
-  const ema50 = calculateEMA(closes, config.ema.medium);
-  const ema200 = calculateEMA(closes, config.ema.long);
-  const { adx } = calculateADX(klines, config.adx.period);
-
-  return klines.map((k, i) => ({
-    ema50: ema50[i],
-    ema200: ema200[i],
-    adx: adx[i],
-  }));
-}
-
-/**
- * Build Lower Timeframe (LTF) indicators (1h)
- * Returns: EMA(short), EMA(medium), ADX, ATR, Donchian High
- */
-export function buildLTFIndicators(
-  klines: Kline[],
-  config: Config['indicators'],
-  donchianLookback: number = 20
-): LTFIndicatorData[] {
-  const closes = klines.map(k => k.close);
-
-  const ema20 = calculateEMA(closes, config.ema.short);
-  const ema50 = calculateEMA(closes, config.ema.medium);
-  const atr = calculateATR(klines, config.atr.period);
-  const { adx } = calculateADX(klines, config.adx.period);
-
-  // Calculate Donchian High for each bar
-  const donchianHighs = klines.map((_, i) => 
-    getDonchianHigh(klines, donchianLookback, i)
-  );
-
-  return klines.map((k, i) => {
-    // v5: Build ADX historical series (excluding current bar to avoid lookahead bias)
-    // For each bar, include ADX values from previous bars only
-    const adxSeries: number[] = [];
-    if (i > 0) {
-      // Include ADX values from previous bars (excluding current bar)
-      for (let j = Math.max(0, i - 10); j < i; j++) {
-        if (adx[j] !== undefined) {
-          adxSeries.push(adx[j]!);
-        }
-      }
-    }
-
-    return {
-      ema20: ema20[i],
-      ema50: ema50[i],
-      adx: adx[i],
-      adx_1h_series: adxSeries.length > 0 ? adxSeries : undefined,
-      atr: atr[i],
-      donchianHigh: donchianHighs[i],
-    };
-  });
-}
-
-/**
- * Get the highest high in the last N bars
- */
-export function getHighestHigh(klines: Kline[], lookback: number, currentIndex: number): number {
-  const start = Math.max(0, currentIndex - lookback + 1);
-  const end = currentIndex + 1;
-  return Math.max(...klines.slice(start, end).map((k) => k.high));
-}
-
-/**
- * Get the lowest low in the last N bars
- */
-export function getLowestLow(klines: Kline[], lookback: number, currentIndex: number): number {
-  const start = Math.max(0, currentIndex - lookback + 1);
-  const end = currentIndex + 1;
-  return Math.min(...klines.slice(start, end).map((k) => k.low));
-}
-
-/**
- * Get Donchian High (highest high of completed bars only)
- * Excludes the current bar to avoid lookahead bias
- * @param klines Array of K-lines
- * @param lookback Number of bars to look back (default: 20)
- * @param currentIndex Current bar index
- * @returns Highest high of the last N completed bars, or undefined if insufficient data
- */
-export function getDonchianHigh(klines: Kline[], lookback: number, currentIndex: number): number | undefined {
-  // Donchian High uses only completed bars (exclude current bar)
-  // Range: [currentIndex - lookback, currentIndex - 1]
-  const start = Math.max(0, currentIndex - lookback);
-  const end = currentIndex; // Exclude current bar
-  
-  if (start >= end || end === 0) {
-    return undefined; // Insufficient historical data
-  }
-  
-  const historicalBars = klines.slice(start, end);
-  if (historicalBars.length === 0) {
-    return undefined;
-  }
-  
-  return Math.max(...historicalBars.map((k) => k.high));
+  return { adx: adxSeries, plusDI, minusDI };
 }

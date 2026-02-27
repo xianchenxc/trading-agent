@@ -9,6 +9,7 @@ import { Kline, HTFIndicatorData, LTFIndicatorData } from '../types';
 import { getIntervalMs } from '../utils/timeUtils';
 import { findHTFIndicatorForLTFBar } from './timeAlignmentService';
 import { globalConfig } from '../config/globalConfig';
+import { buildHTFIndicators, buildLTFIndicators } from '../data/indicatorBuilders';
 
 export interface InstanceData {
   ltfKlines: Kline[];
@@ -87,7 +88,6 @@ export async function prepareBacktestData(
   }
 
   // Calculate indicators
-  const { buildHTFIndicators, buildLTFIndicators } = await import('../data/indicators');
   const htfIndicators = buildHTFIndicators(htfKlines, config.indicators);
   const ltfIndicators = buildLTFIndicators(ltfKlines, config.indicators, config.strategy.lookbackPeriod);
 
@@ -132,7 +132,6 @@ export async function preparePaperTradingData(
   }
 
   // Calculate indicators
-  const { buildHTFIndicators, buildLTFIndicators } = await import('../data/indicators');
   const htfIndicators = buildHTFIndicators(htfKlines, config.indicators);
   const ltfIndicators = buildLTFIndicators(ltfKlines, config.indicators, config.strategy.lookbackPeriod);
 
@@ -200,7 +199,6 @@ export async function checkNewBarAndPrepareBarData(
     }
   }
 
-  const { buildHTFIndicators, buildLTFIndicators } = await import('../data/indicators');
   const htfIndicators = buildHTFIndicators(state.htfKlines, config.indicators);
   const ltfIndicators = buildLTFIndicators(state.ltfKlines, config.indicators, config.strategy.lookbackPeriod);
 

@@ -2,10 +2,10 @@
  * Unit tests for ADX calculation
  */
 
-import { calculateADX } from "../indicators";
+import { adx } from "../indicators";
 import { Kline } from "../../types";
 
-describe("calculateADX", () => {
+describe("adx", () => {
   // ... rest identical, paths already correct (../indicators = data/indicators, ../../types = types)
   function createKline(
     openTime: number,
@@ -32,7 +32,7 @@ describe("calculateADX", () => {
       for (let i = 0; i < 50; i++) {
         klines.push(createKline(i * 3600000, 100, 105, 95, 100 + i));
       }
-      const result = calculateADX(klines, 14);
+      const result = adx(klines, 14);
       expect(result.adx).toHaveLength(50);
       expect(result.plusDI).toHaveLength(50);
       expect(result.minusDI).toHaveLength(50);
@@ -43,11 +43,11 @@ describe("calculateADX", () => {
       for (let i = 0; i < 30; i++) {
         klines.push(createKline(i * 3600000, 100, 105, 95, 100 + i));
       }
-      const result = calculateADX(klines, 14);
+      const result = adx(klines, 14);
       for (let i = 0; i < 14; i++) {
-        expect(result.plusDI[i]).toBeUndefined();
-        expect(result.minusDI[i]).toBeUndefined();
-        expect(result.adx[i]).toBeUndefined();
+        expect(Number.isNaN(result.plusDI[i])).toBe(true);
+        expect(Number.isNaN(result.minusDI[i])).toBe(true);
+        expect(Number.isNaN(result.adx[i])).toBe(true);
       }
     });
 
@@ -56,11 +56,9 @@ describe("calculateADX", () => {
       for (let i = 0; i < 30; i++) {
         klines.push(createKline(i * 3600000, 100, 105, 95, 100 + i));
       }
-      const result = calculateADX(klines, 14);
-      expect(result.plusDI[14]).toBeDefined();
-      expect(result.minusDI[14]).toBeDefined();
-      expect(typeof result.plusDI[14]).toBe("number");
-      expect(typeof result.minusDI[14]).toBe("number");
+      const result = adx(klines, 14);
+      expect(Number.isNaN(result.plusDI[14])).toBe(false);
+      expect(Number.isNaN(result.minusDI[14])).toBe(false);
     });
 
     it("should calculate ADX starting from period * 2 - 1 index", () => {
@@ -68,18 +66,17 @@ describe("calculateADX", () => {
       for (let i = 0; i < 50; i++) {
         klines.push(createKline(i * 3600000, 100, 105, 95, 100 + i));
       }
-      const result = calculateADX(klines, 14);
+      const result = adx(klines, 14);
       for (let i = 0; i < 27; i++) {
-        expect(result.adx[i]).toBeUndefined();
+        expect(Number.isNaN(result.adx[i])).toBe(true);
       }
-      expect(result.adx[27]).toBeDefined();
-      expect(typeof result.adx[27]).toBe("number");
+      expect(Number.isNaN(result.adx[27])).toBe(false);
     });
   });
 
   describe("Edge cases", () => {
     it("should handle empty array", () => {
-      const result = calculateADX([], 14);
+      const result = adx([], 14);
       expect(result.adx).toHaveLength(0);
       expect(result.plusDI).toHaveLength(0);
       expect(result.minusDI).toHaveLength(0);
@@ -90,11 +87,11 @@ describe("calculateADX", () => {
       for (let i = 0; i < 10; i++) {
         klines.push(createKline(i * 3600000, 100, 105, 95, 100));
       }
-      const result = calculateADX(klines, 14);
+      const result = adx(klines, 14);
       for (let i = 0; i < 10; i++) {
-        expect(result.adx[i]).toBeUndefined();
-        expect(result.plusDI[i]).toBeUndefined();
-        expect(result.minusDI[i]).toBeUndefined();
+        expect(Number.isNaN(result.adx[i])).toBe(true);
+        expect(Number.isNaN(result.plusDI[i])).toBe(true);
+        expect(Number.isNaN(result.minusDI[i])).toBe(true);
       }
     });
 
@@ -103,8 +100,8 @@ describe("calculateADX", () => {
       for (let i = 0; i < 14; i++) {
         klines.push(createKline(i * 3600000, 100, 105, 95, 100 + i));
       }
-      const result = calculateADX(klines, 14);
-      expect(result.plusDI[13]).toBeUndefined();
+      const result = adx(klines, 14);
+      expect(Number.isNaN(result.plusDI[13])).toBe(true);
     });
   });
 
@@ -117,10 +114,10 @@ describe("calculateADX", () => {
           createKline(i * 3600000, basePrice, basePrice + 3, basePrice - 2, basePrice + 1)
         );
       }
-      const result = calculateADX(klines, 14);
+      const result = adx(klines, 14);
       const lastPlusDI = result.plusDI[result.plusDI.length - 1];
       const lastMinusDI = result.minusDI[result.minusDI.length - 1];
-      if (lastPlusDI !== undefined && lastMinusDI !== undefined) {
+      if (!Number.isNaN(lastPlusDI) && !Number.isNaN(lastMinusDI)) {
         expect(lastPlusDI).toBeGreaterThan(lastMinusDI);
       }
     });
@@ -135,10 +132,10 @@ describe("calculateADX", () => {
           createKline(i * 3600000, basePrice, basePrice + 2, basePrice - 3, basePrice - 1)
         );
       }
-      const result = calculateADX(klines, 14);
+      const result = adx(klines, 14);
       const lastPlusDI = result.plusDI[result.plusDI.length - 1];
       const lastMinusDI = result.minusDI[result.minusDI.length - 1];
-      if (lastPlusDI !== undefined && lastMinusDI !== undefined) {
+      if (!Number.isNaN(lastPlusDI) && !Number.isNaN(lastMinusDI)) {
         expect(lastMinusDI).toBeGreaterThan(lastPlusDI);
       }
     });
@@ -150,12 +147,11 @@ describe("calculateADX", () => {
       for (let i = 0; i < 50; i++) {
         klines.push(createKline(i * 3600000, 100, 105, 95, 100 + Math.sin(i) * 5));
       }
-      const result = calculateADX(klines, 14);
+      const result = adx(klines, 14);
       for (let i = 0; i < result.adx.length; i++) {
-        if (result.adx[i] !== undefined && !isNaN(result.adx[i]!)) {
+        if (!Number.isNaN(result.adx[i])) {
           expect(result.adx[i]).toBeGreaterThanOrEqual(0);
           expect(result.adx[i]).toBeLessThanOrEqual(100);
-        }
       }
     });
 
@@ -164,13 +160,13 @@ describe("calculateADX", () => {
       for (let i = 0; i < 50; i++) {
         klines.push(createKline(i * 3600000, 100, 105, 95, 100 + i));
       }
-      const result = calculateADX(klines, 14);
+      const result = adx(klines, 14);
       for (let i = 0; i < result.plusDI.length; i++) {
-        if (result.plusDI[i] !== undefined) {
+        if (!Number.isNaN(result.plusDI[i])) {
           expect(result.plusDI[i]).toBeGreaterThanOrEqual(0);
           expect(result.plusDI[i]).toBeLessThanOrEqual(100);
         }
-        if (result.minusDI[i] !== undefined) {
+        if (!Number.isNaN(result.minusDI[i])) {
           expect(result.minusDI[i]).toBeGreaterThanOrEqual(0);
           expect(result.minusDI[i]).toBeLessThanOrEqual(100);
         }
@@ -184,7 +180,7 @@ describe("calculateADX", () => {
       for (let i = 0; i < 30; i++) {
         klines.push(createKline(i * 3600000, 100, 105, 95, 100));
       }
-      const result = calculateADX(klines, 14);
+      const result = adx(klines, 14);
       expect(result.adx.length).toBe(klines.length);
       expect(result.plusDI.length).toBe(klines.length);
       expect(result.minusDI.length).toBe(klines.length);
@@ -198,21 +194,14 @@ describe("calculateADX", () => {
           createKline(i * 3600000, basePrice, basePrice + 3, basePrice - 2, basePrice + 1)
         );
       }
-      const result14 = calculateADX(klines, 14);
-      const result10 = calculateADX(klines, 10);
-      expect(result14.adx[28]).toBeDefined();
-      expect(result10.adx[20]).toBeDefined();
-      if (
-        result14.adx[28] !== undefined &&
-        !isNaN(result14.adx[28]!) &&
-        result10.adx[20] !== undefined &&
-        !isNaN(result10.adx[20]!)
-      ) {
-        expect(result14.adx[28]).toBeGreaterThanOrEqual(0);
-        expect(result14.adx[28]).toBeLessThanOrEqual(100);
-        expect(result10.adx[20]).toBeGreaterThanOrEqual(0);
-        expect(result10.adx[20]).toBeLessThanOrEqual(100);
-      }
+      const result14 = adx(klines, 14);
+      const result10 = adx(klines, 10);
+      expect(Number.isNaN(result14.adx[28])).toBe(false);
+      expect(Number.isNaN(result10.adx[20])).toBe(false);
+      expect(result14.adx[28]).toBeGreaterThanOrEqual(0);
+      expect(result14.adx[28]).toBeLessThanOrEqual(100);
+      expect(result10.adx[20]).toBeGreaterThanOrEqual(0);
+      expect(result10.adx[20]).toBeLessThanOrEqual(100);
     });
   });
 
@@ -234,12 +223,11 @@ describe("calculateADX", () => {
           )
         );
       }
-      const result = calculateADX(klines, 14);
+      const result = adx(klines, 14);
       const lastAdx = result.adx[result.adx.length - 1];
-      expect(lastAdx).toBeDefined();
-      expect(typeof lastAdx).toBe("number");
-      expect(lastAdx!).toBeGreaterThanOrEqual(0);
-      expect(lastAdx!).toBeLessThanOrEqual(100);
+      expect(Number.isNaN(lastAdx)).toBe(false);
+      expect(lastAdx).toBeGreaterThanOrEqual(0);
+      expect(lastAdx).toBeLessThanOrEqual(100);
     });
   });
 });
